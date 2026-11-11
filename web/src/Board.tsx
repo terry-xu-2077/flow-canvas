@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Background, BackgroundVariant, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider,
+  Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow,
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
@@ -44,6 +44,40 @@ function findFree(nodes: CanvasNode[], x: number, y: number, w: number, h: numbe
 }
 
 const edgeBase: Partial<Edge> = { style: { strokeWidth: 2 } }
+
+interface Guides { v: { x: number; y1: number; y2: number }[]; h: { y: number; x1: number; x2: number }[] }
+const NO_GUIDES: Guides = { v: [], h: [] }
+
+/** Snap a dragged node's edges/centre to those of the other nodes (within `thr` flow units); also returns the guide lines. */
+function snapToNodes(moving: CanvasNode, pos: { x: number; y: number }, others: CanvasNode[], thr: number) {
+  const b = nodeBox(moving)
+  const xs = [pos.x, pos.x + b.w / 2, pos.x + b.w]
+  const ys = [pos.y, pos.y + b.h / 2, pos.y + b.h]
+  let dx: number | null = null, dy: number | null = null
+  for (const o of others) {
+    const ob = nodeBox(o)
+    const oxs = [o.position.x, o.position.x + ob.w / 2, o.position.x + ob.w]
+    const oys = [o.position.y, o.position.y + ob.h / 2, o.position.y + ob.h]
+    for (const x of xs) for (const ox of oxs) if (Math.abs(ox - x) < thr && (dx === null || Math.abs(ox - x) < Math.abs(dx))) dx = ox - x
+    for (const y of ys) for (const oy of oys) if (Math.abs(oy - y) < thr && (dy === null || Math.abs(oy - y) < Math.abs(dy))) dy = oy - y
+  }
+  const snapped = { x: pos.x + (dx ?? 0), y: pos.y + (dy ?? 0) }
+  const guides: Guides = { v: [], h: [] }
+  const sxs = [snapped.x, snapped.x + b.w / 2, snapped.x + b.w]
+  const sys = [snapped.y, snapped.y + b.h / 2, snapped.y + b.h]
+  for (const o of others) {
+    const ob = nodeBox(o)
+    const oxs = [o.position.x, o.position.x + ob.w / 2, o.position.x + ob.w]
+    const oys = [o.position.y, o.position.y + ob.h / 2, o.position.y + ob.h]
+    if (dx !== null) for (const x of sxs) if (oxs.some(ox => Math.abs(ox - x) < 0.5)) {
+      guides.v.push({ x, y1: Math.min(snapped.y, o.position.y), y2: Math.max(snapped.y + b.h, o.position.y + ob.h) })
+    }
+    if (dy !== null) for (const y of sys) if (oys.some(oy => Math.abs(oy - y) < 0.5)) {
+      guides.h.push({ y, x1: Math.min(snapped.x, o.position.x), x2: Math.max(snapped.x + b.w, o.position.x + ob.w) })
+    }
+  }
+  return { snapped, guides }
+}
 
 /** References of a generation card in edge order; <Picture N> in the prompt means the N-th entry. */
 function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo[] {
@@ -93,6 +127,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [snapOn, setSnapOn] = useState(() => localStorage.getItem('fc_snap') === '1')
+  const [guides, setGuides] = useState<Guides>(NO_GUIDES)
   const nodesRef = useRef<CanvasNode[]>([])
   const edgesRef = useRef<Edge[]>([])
   const viewportRef = useRef<unknown>({ x: 0, y: 0, zoom: 1 })
@@ -186,6 +222,30 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
     if (updates.size) setNodes(ns => ns.map(n => (updates.has(n.id) ? ({ ...n, data: { ...n.data, refIds: updates.get(n.id) } } as CanvasNode) : n)))
   }, [loaded, nodes, edges, setNodes])
+
+  const toggleSnap = useCallback(() => {
+    setSnapOn(on => { localStorage.setItem('fc_snap', on ? '0' : '1'); return !on })
+    setGuides(NO_GUIDES)
+  }, [])
+
+  // With alignment on, a single node being dragged snaps to the edges/centres of the others (guide lines shown).
+  const handleNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
+    if (snapOn) {
+      // the drop itself arrives as a (dragging: false) position change, so it has to be snapped too
+      const moves = changes.filter((c): c is Extract<NodeChange<CanvasNode>, { type: 'position' }> => c.type === 'position' && !!c.position)
+      if (moves.length === 1) {
+        const c = moves[0]
+        const moving = nodesRef.current.find(n => n.id === c.id)
+        if (moving) {
+          const others = nodesRef.current.filter(n => n.id !== c.id && !n.selected)
+          const { snapped, guides: g } = snapToNodes(moving, c.position!, others, 8 / rf.getZoom())
+          c.position = snapped
+          setGuides(c.dragging ? g : NO_GUIDES)
+        }
+      } else if (changes.some(c => c.type === 'position' && c.dragging === false)) setGuides(NO_GUIDES)
+    }
+    onNodesChange(changes)
+  }, [snapOn, onNodesChange, rf])
 
   // ---- node helpers
   const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
@@ -457,7 +517,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       <div className="board" onDrop={onDrop} onDragOver={e => e.preventDefault()}>
         <ReactFlow
           nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-          onNodesChange={(c: NodeChange<CanvasNode>[]) => onNodesChange(c)} onEdgesChange={onEdgesChange}
+          onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
           onConnect={onConnect} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
           minZoom={0.1} maxZoom={2} selectionOnDrag panOnDrag={[1, 2]} panActivationKeyCode="Space"
@@ -466,7 +526,20 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           colorMode="dark" fitView={false}
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} />
-          <Controls showInteractive={false} />
+          <Controls showInteractive={false}>
+            <ControlButton className={snapOn ? 'on' : ''} onClick={toggleSnap}
+                           title={snapOn ? '自动对齐：已开启（拖动节点时吸附到其他节点的边缘和中心）' : '自动对齐：已关闭（点击开启）'}>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+                <path d="M2 1.5v13M14 1.5v13" /><rect x="4.5" y="3.5" width="7" height="3" rx="1" /><rect x="3.5" y="9.5" width="9" height="3" rx="1" />
+              </svg>
+            </ControlButton>
+          </Controls>
+          {snapOn && (
+            <ViewportPortal>
+              {guides.v.map((g, i) => <div key={`v${i}`} className="guide" style={{ left: g.x, top: g.y1, width: 0, height: g.y2 - g.y1 }} />)}
+              {guides.h.map((g, i) => <div key={`h${i}`} className="guide" style={{ left: g.x1, top: g.y, width: g.x2 - g.x1, height: 0 }} />)}
+            </ViewportPortal>
+          )}
           <MiniMap pannable zoomable nodeStrokeWidth={2} />
           <Panel position="top-left" className="toolbar">
             <button onClick={onBack} title="返回画板列表">←</button>
