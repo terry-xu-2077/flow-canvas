@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { assetUrl, downloadUrl } from './api'
 import { useCanvas } from './CanvasContext'
@@ -5,57 +6,102 @@ import { IMAGE_WIDTH, type GenNodeType, type ImageNodeType } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
 
+/** Tiny aspect-ratio glyph for the ratio grid. */
+function RatioGlyph({ ratio }: { ratio: string }) {
+  const [w, h] = ratio.split(':').map(Number)
+  const max = 16
+  const k = max / Math.max(w, h)
+  return <span className="glyph" style={{ width: Math.round(w * k), height: Math.round(h * k) }} />
+}
+
+function Segmented<T extends string | number>(props: {
+  options: T[]; value: T; onChange: (v: T) => void; label?: (v: T) => string
+}) {
+  return (
+    <div className="seg">
+      {props.options.map(o => (
+        <button key={String(o)} className={o === props.value ? 'on' : ''} onClick={() => props.onChange(o)}>
+          {props.label ? props.label(o) : String(o)}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const canvas = useCanvas()
   const { deleteElements } = useReactFlow()
+  const [open, setOpen] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
   const model = canvas.models.find(m => m.key === data.model) ?? canvas.models[0]
   const running = data.jobs.some(j => !FINAL.has(j.status))
   const refs = canvas.refCount(id)
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
   const visibleJobs = data.jobs.filter(j => !FINAL.has(j.status) || j.status === 'failed')
+  const canRun = !!data.prompt.trim() && !running && !!model
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => { if (!popRef.current?.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+  useEffect(() => { if (!selected) setOpen(false) }, [selected])
+
+  const pickModel = (key: string) => {
+    const next = canvas.models.find(m => m.key === key)
+    if (!next) return
+    patch({
+      model: next.key,
+      ratio: next.ratios.includes(data.ratio) ? data.ratio : next.ratios[0],
+      size: next.sizes.includes(data.size) ? data.size : next.sizes[0],
+    })
+  }
 
   return (
     <div className={`card gen${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
-        <span>生成卡片</span>
+        <span>生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
         <button className="icon nodrag" title="删除卡片" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
       </div>
       <textarea
-        className="nodrag nowheel" rows={4} placeholder="描述你想生成的画面…"
+        className="nodrag nowheel" rows={4} placeholder="描述你想生成的画面…（Ctrl+Enter 生成）"
         value={data.prompt} onChange={e => patch({ prompt: e.target.value })}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canRun) canvas.generate(id) }}
       />
-      <div className="row nodrag">
-        <select value={model?.key ?? ''} onChange={e => {
-          const next = canvas.models.find(m => m.key === e.target.value)
-          if (!next) return
-          patch({
-            model: next.key,
-            ratio: next.ratios.includes(data.ratio) ? data.ratio : next.ratios[0],
-            size: next.sizes.includes(data.size) ? data.size : next.sizes[0],
-          })
-        }}>
-          {canvas.models.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
-        </select>
-      </div>
-      <div className="row nodrag">
-        <select value={data.ratio} onChange={e => patch({ ratio: e.target.value })}>
-          {(model?.ratios ?? [data.ratio]).map(r => <option key={r}>{r}</option>)}
-        </select>
-        <select value={data.size} onChange={e => patch({ size: e.target.value })}>
-          {(model?.sizes ?? [data.size]).map(s => <option key={s}>{s}</option>)}
-        </select>
-        <select value={data.count} title="一次生成几张" onChange={e => patch({ count: Number(e.target.value) })}>
-          {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}
-        </select>
-      </div>
-      <div className="hint">{refs > 0 ? `参考图 ${refs} 张` : '把图片的右侧圆点拖线到本卡片左侧，即可作为参考图'}</div>
-      <div className="row nodrag">
-        <button className="primary" disabled={!data.prompt.trim() || running || !model} onClick={() => canvas.generate(id)}>
-          {running ? '生成中…' : '生成'}
+      <div className="foot nodrag">
+        <button className="summary" onClick={() => setOpen(o => !o)} title="图像设置">
+          {model?.name ?? '…'} · {data.ratio} · {data.size} · {data.count} 张 <span className="caret">▾</span>
         </button>
         {running && <button onClick={() => canvas.cancelJobs(id)}>取消</button>}
+        <button className="primary" disabled={!canRun} onClick={() => canvas.generate(id)}>
+          {running ? '生成中…' : '生成'}
+        </button>
       </div>
+      {open && (
+        <div className="pop nodrag nowheel nopan" ref={popRef}>
+          <div className="pop-title">图像设置</div>
+          <div className="pop-label">模型</div>
+          <div className="models">
+            {canvas.models.map(m => (
+              <button key={m.key} className={m.key === model?.key ? 'on' : ''} onClick={() => pickModel(m.key)}>{m.name}</button>
+            ))}
+          </div>
+          <div className="pop-label">宽高比</div>
+          <div className="ratios">
+            {(model?.ratios ?? []).map(r => (
+              <button key={r} className={r === data.ratio ? 'on' : ''} onClick={() => patch({ ratio: r })}>
+                <RatioGlyph ratio={r} /><span>{r}</span>
+              </button>
+            ))}
+          </div>
+          <div className="pop-label">分辨率</div>
+          <Segmented options={model?.sizes ?? []} value={data.size} onChange={v => patch({ size: v })} />
+          <div className="pop-label">一次生成</div>
+          <Segmented options={[1, 2, 3, 4]} value={data.count} onChange={v => patch({ count: v })} label={n => `${n} 张`} />
+        </div>
+      )}
       {visibleJobs.length > 0 && (
         <ul className="jobs">
           {visibleJobs.map(j => (
@@ -81,6 +127,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
         className="nodrag-img" draggable={false} src={assetUrl(data.assetId, 640)}
         width={IMAGE_WIDTH} height={height} alt="" onDoubleClick={() => canvas.preview(data.assetId)}
       />
+      <div className="img-meta">{data.w} × {data.h}</div>
       <div className="img-bar nodrag">
         <button title="以此图为参考，新建生成卡片" onClick={() => canvas.continueFrom([id], 'together')}>继续生成</button>
         <button title="大图预览（双击图片也可）" onClick={() => canvas.preview(data.assetId)}>预览</button>

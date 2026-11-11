@@ -5,7 +5,7 @@ import {
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo } from './api'
+import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
 import { nodeTypes } from './nodes'
 import {
@@ -59,6 +59,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
+  const [layersOpen, setLayersOpen] = useState(false)
   const nodesRef = useRef<CanvasNode[]>([])
   const edgesRef = useRef<Edge[]>([])
   const viewportRef = useRef<unknown>({ x: 0, y: 0, zoom: 1 })
@@ -171,6 +172,29 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
   }, [addImages])
+
+  const fitAll = useCallback(() => { void rf.fitView({ duration: 250, padding: 0.2, maxZoom: 1 }) }, [rf])
+  const focusNode = useCallback((id: string) => {
+    setNodes(ns => ns.map(n => (n.selected === (n.id === id) ? n : { ...n, selected: n.id === id })))
+    void rf.fitView({ nodes: [{ id }], duration: 250, padding: 0.6, maxZoom: 1 })
+  }, [rf, setNodes])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (['TEXTAREA', 'INPUT', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'escape') { setPreviewId(null); return }
+      if (previewId) return
+      if (k === 'a') { e.preventDefault(); addGenCard() }
+      else if (k === 'u') { e.preventDefault(); fileInput.current?.click() }
+      else if (k === 'f') { e.preventDefault(); fitAll() }
+      else if (k === 'l') { e.preventDefault(); setLayersOpen(o => !o) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [addGenCard, fitAll, previewId])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[], mode: 'together' | 'each') => {
@@ -321,11 +345,37 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             <button onClick={onBack} title="返回画板列表">←</button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
-            <button className="primary" onClick={addGenCard} disabled={!models.length}>＋ 生成卡片</button>
-            <button onClick={() => fileInput.current?.click()}>上传图片{busyUploads ? `（${busyUploads}）` : ''}</button>
+            <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
+          </Panel>
+          <Panel position="top-right" className="toolbar who">{getUser()}</Panel>
+          {layersOpen && (
+            <Panel position="top-right" className="layers">
+              <div className="layers-head"><strong>图层</strong>
+                <button className="icon" onClick={() => setLayersOpen(false)}>✕</button></div>
+              {nodes.length === 0 && <div className="hint">画布上还没有内容</div>}
+              <ul>
+                {[...nodes].reverse().map(n => (
+                  <li key={n.id} className={n.selected ? 'on' : ''} onClick={() => focusNode(n.id)}>
+                    {n.type === 'gen'
+                      ? `✦ 生成卡片 · ${((n as GenNodeType).data.prompt || '空').slice(0, 16)}`
+                      : `▣ 图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
+          <Panel position="bottom-center" className="dock">
+            <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建生成卡片（A）">
+              ＋ 生成卡片 <kbd>A</kbd>
+            </button>
+            <button onClick={() => fileInput.current?.click()} title="上传图片（U）">
+              上传图片{busyUploads ? `（${busyUploads}）` : ''} <kbd>U</kbd>
+            </button>
+            <span className="sep" />
+            <button onClick={fitAll} title="适应画面（F）">适应画面 <kbd>F</kbd></button>
+            <button className={layersOpen ? 'on' : ''} onClick={() => setLayersOpen(o => !o)} title="图层（L）">图层 <kbd>L</kbd></button>
             <input ref={fileInput} type="file" accept="image/*" multiple hidden
                    onChange={e => { void addImages(Array.from(e.target.files ?? [])); e.target.value = '' }} />
-            <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
           </Panel>
           {modelError && (
             <Panel position="top-center" className="banner">
@@ -333,7 +383,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             </Panel>
           )}
           {selectedImages.length > 0 && (
-            <Panel position="bottom-center" className="selbar">
+            <Panel position="bottom-center" className="selbar" style={{ marginBottom: 66 }}>
               已选 {selectedImages.length} 张图
               <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id), 'together')}>
                 作为参考，新建 1 张卡片
