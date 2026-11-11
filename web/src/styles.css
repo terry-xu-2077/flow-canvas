@@ -292,3 +292,11 @@ button, select, input { border-radius: var(--r-ctl); }
 .dock button.primary:hover:not(:disabled) { background: #363e4a; border-color: transparent; }
 .dock .primary .ico { color: var(--accent); }
 .dock .primary kbd { color: var(--muted); border-color: var(--line); }
+
+/* ---- the top-left / top-right strips on the board float without an outer rounded plate */
+.react-flow__panel.toolbar { background: transparent; border-color: transparent; box-shadow: none; padding: 0; }
+.react-flow__panel.toolbar.who { padding: 0; gap: 8px; }
+
+/* ---- board list header: everything on the right shares one centre line */
+.list header .who { display: flex; align-items: center; gap: 10px; }
+.list header .who .usage { margin-right: 0; }
