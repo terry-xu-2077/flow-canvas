@@ -76,7 +76,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
         <div className="tile new split">
           <button className="split-main" onClick={create}>＋ 新建画板</button>
           <span className="split-sep" aria-hidden>|</span>
-          <button className="split-side" disabled={importing} title="从 zip 导入图片，新建一个画板" onClick={() => zipInput.current?.click()}>
+          <button className="split-side" disabled={importing} title="导入画板 zip（也可以是一包图片），新建一个画板" onClick={() => zipInput.current?.click()}>
             {importing ? '导入中…' : '⤒ 导入 zip'}
           </button>
         </div>
@@ -91,7 +91,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
           <div key={b.id} className="tile" onClick={() => onOpen(b.id)}>
             <strong>{b.name}</strong>
             <small>{new Date(b.updated * 1000).toLocaleString()}</small>
-            <button className="icon tile-dl" title="下载画板里的全部图片（zip）" onClick={async e => {
+            <button className="icon tile-dl" title="下载整个画板（zip：画布内容 + 全部图片）" onClick={async e => {
               e.stopPropagation()
               try { await api.downloadBoardZip(b.id, b.name) } catch (err) { alert(`下载失败：${(err as Error).message}`) }
             }}>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import uuid
 import zipfile
@@ -129,6 +130,45 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
             raise HTTPException(404, "画板不存在")
         return board
 
+    def _import_full(zf: zipfile.ZipFile, name: str, user: str) -> dict:
+        """Restore a board exported by the zip download: board.json (nodes, edges, viewport, name) + assets/*."""
+        try:
+            doc = json.loads(zf.read("board.json").decode("utf-8"))
+            data = doc["data"]
+            assert isinstance(data, dict)
+        except Exception:
+            raise HTTPException(400, "board.json 无法读取")
+        exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+        entries = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(exts)]
+        if len(entries) > 1000:
+            raise HTTPException(400, "zip 里的图片太多")
+        for i in entries:
+            if i.file_size > settings.max_upload_bytes:
+                continue
+            try:
+                save_image_bytes(settings, store, zf.read(i))
+            except AssetError:
+                continue
+        nodes = []
+        for n in data.get("nodes") or []:
+            d = n.get("data") or {}
+            if n.get("type") == "image":
+                if d.get("pending") or not d.get("assetId") or not store.get_asset(d["assetId"]):
+                    continue  # unfinished placeholders and images that did not come along
+            elif n.get("type") == "gen":
+                n["data"] = {**d, "jobs": []}  # jobs belong to the old board; finished results are already nodes
+            elif n.get("type") == "refset":
+                n["data"] = {**d, "slots": [s if (not s.get("assetId") or store.get_asset(s["assetId"])) else {"id": s.get("id")}
+                                           for s in d.get("slots", [])]}
+            nodes.append(n)
+        keep = {n.get("id") for n in nodes}
+        edges = [e for e in data.get("edges") or [] if e.get("source") in keep and e.get("target") in keep]
+        title = ((doc.get("name") or name or "导入的画板").strip()[:60]) or "导入的画板"
+        board = store.create_board(user, uuid.uuid4().hex[:12], title)
+        store.save_board(user, board["id"], {"nodes": nodes, "edges": edges,
+                                             "viewport": data.get("viewport") or {"x": 40, "y": 40, "zoom": 0.6}}, title)
+        return {**board, "images": len(entries)}
+
     @app.post("/api/boards/import")
     async def import_board(request: Request, name: str = "", user: str = user_dep):
         """Create a board from a zip of images (the inverse of the zip download); images are laid out in a grid."""
@@ -137,6 +177,8 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
             zf = zipfile.ZipFile(io.BytesIO(raw))
         except zipfile.BadZipFile:
             raise HTTPException(400, "不是有效的 zip 文件")
+        if "board.json" in zf.namelist():
+            return _import_full(zf, name, user)
         exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
         entries = sorted((i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(exts)),
                          key=lambda i: i.filename)
@@ -171,7 +213,7 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
 
     @app.get("/api/boards/{board_id}/zip")
     async def board_zip(board_id: str, user: str = user_dep):
-        """All images of a board (generated, uploaded and in collections) as one zip, in canvas order."""
+        """The whole board as a zip: board.json (nodes, edges, viewport, name) and every image under assets/."""
         board = store.get_board(user, board_id)
         if not board:
             raise HTTPException(404, "画板不存在")
@@ -184,18 +226,16 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
                 if a and a not in ids:
                     ids.append(a)
         buf = io.BytesIO()
-        count = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # images are already compressed
+            doc = {"format": "flow-canvas-board", "version": 1, "name": board["name"], "data": board["data"]}
+            zf.writestr("board.json", json.dumps(doc, ensure_ascii=False, indent=1))
             for a in ids:
                 meta = store.get_asset(a) if re.fullmatch(r"[0-9a-f]{40}", a) else None
                 path = asset_path(settings, a) if meta else None
                 if not meta or not path or not path.exists():
                     continue
                 ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}.get(meta["mime"], "img")
-                count += 1
-                zf.write(path, f"{count:03d}_{a[:8]}.{ext}")
-        if not count:
-            raise HTTPException(404, "这个画板里还没有图片")
+                zf.write(path, f"assets/{a}.{ext}")
         fname = quote(re.sub(r'[\\/:*?"<>|]', "_", board["name"] or "board") + ".zip")
         return Response(buf.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"})
