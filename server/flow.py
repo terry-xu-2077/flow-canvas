@@ -29,10 +29,18 @@ def _is_error_line(line: str) -> bool:
     return line.startswith(("错误", "❌")) or line.lower().startswith("error") or "生成失败" in line
 
 
-def mentions_to_text(prompt: str) -> str:
-    """<Picture N> tags (as written by the prompt editor) -> 图片N, N = upload order of the references."""
-    # a trailing space keeps "图片1" + "2个人" from reading as 图片12
-    return PICTURE_TAG_RE.sub(lambda m: f"图片{int(m.group(1))}" + (" " if m.group(2) else ""), prompt)
+def mentions_to_text(prompt: str, n_refs: int) -> str:
+    """<Picture N> -> 图片N, N = position in the submitted reference list (1..n_refs).
+
+    A tag that points outside the list would name the wrong image, so it is removed instead.
+    """
+    def one(m: re.Match) -> str:
+        n = int(m.group(1))
+        if not 1 <= n <= n_refs:
+            return ""
+        # a trailing space keeps "图片1" + "2个人" from reading as 图片12
+        return f"图片{n}" + (" " if m.group(2) else "")
+    return PICTURE_TAG_RE.sub(one, prompt)
 
 
 def friendly_progress(line: str) -> str:

@@ -86,7 +86,7 @@ class JobRunner:
         async def on_progress(text: str) -> None:
             await self._progress(job_id, text)
 
-        url = await self.flow.generate(job["model"], mentions_to_text(job["prompt"]), ref_ids, on_progress)
+        url = await self.flow.generate(job["model"], mentions_to_text(job["prompt"], len(ref_ids)), ref_ids, on_progress)
         await self._progress(job_id, "下载结果…")
         data = await self.flow.download(url)
         saved = save_image_bytes(self.settings, self.store, data)

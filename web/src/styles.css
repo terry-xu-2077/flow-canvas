@@ -189,3 +189,5 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .react-flow__resize-control.line.left::after, .react-flow__resize-control.line.right::after { top: 0; bottom: 0; left: -5px; right: -5px; }
 .react-flow__resize-control.line.top::after, .react-flow__resize-control.line.bottom::after { left: 0; right: 0; top: -5px; bottom: -5px; }
 .react-flow__resize-control.handle { width: 16px; height: 16px; background: transparent !important; border: none !important; border-radius: 0; }
+
+.hint.warn { color: #ffd37a; }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { assetUrl } from './api'
 
-export interface RefInfo { assetId: string; w: number; h: number; note?: string }
+export interface RefInfo { key: string; assetId: string; w: number; h: number; note?: string }
 
 const CARET = '​'
 const TOKEN = /<Picture\s+(\d+)>/gi
@@ -40,7 +40,7 @@ function appendText(el: Node, text: string) {
   })
 }
 
-function renderRich(el: HTMLElement, raw: string, refs: RefInfo[]) {
+function renderRich(el: HTMLElement, raw: string, refs: (RefInfo | undefined)[]) {
   el.replaceChildren()
   let last = 0
   for (const m of raw.matchAll(TOKEN)) {
@@ -73,7 +73,7 @@ function serialize(root: Node): string {
 interface Menu { q: string; active: number; x: number; y: number; chip: HTMLElement | null }
 
 export default function PromptEditor(props: {
-  value: string; refs: RefInfo[]; onChange: (v: string) => void; onSubmit: () => void
+  value: string; refs: (RefInfo | undefined)[]; onChange: (v: string) => void; onSubmit: () => void
 }) {
   const { value, refs, onChange, onSubmit } = props
   const el = useRef<HTMLDivElement>(null)
@@ -81,10 +81,10 @@ export default function PromptEditor(props: {
   const rangeRef = useRef<Range | null>(null)
   const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<Menu | null>(null)
-  const refsKey = refs.map(r => r.assetId).join(',')
+  const refsKey = refs.map(r => r?.assetId ?? '-').join(',')
   const shownKey = useRef('')
 
-  const items = refs.map((r, i) => ({ ...r, index: i + 1 }))
+  const items = refs.flatMap((r, i) => (r ? [{ ...r, index: i + 1 }] : []))
     .filter(r => !menu?.q || `图${r.index}${r.note ?? ''}picture${r.index}`.toLowerCase().includes(menu.q))
 
   // Re-render the editor content when the value changes from outside, the references change, or the view mode flips.
@@ -236,7 +236,8 @@ export default function PromptEditor(props: {
 
   const toggleRaw = useCallback(() => { setMenu(null); emit(); setRaw(r => !r) }, [raw]) // eslint-disable-line
 
-  const status = refs.length ? `${refs.length} 图` : '输入 @ 引用参考图'
+  const present = refs.filter(Boolean).length
+  const status = present ? `${present} 图` : '输入 @ 引用参考图'
 
   return (
     <div className="pe-wrap nodrag nowheel nopan">
@@ -264,7 +265,7 @@ export default function PromptEditor(props: {
           ))}
           {!items.length && (
             <div className="at-empty">
-              {refs.length ? '没有匹配的参考图' : '还没有参考图。把画布上图片右侧的圆点连线到本卡片，再用 @ 引用'}
+              {present ? '没有匹配的参考图' : '还没有参考图。把画布上图片右侧的圆点连线到本卡片，再用 @ 引用'}
             </div>
           )}
         </div>, document.body)}

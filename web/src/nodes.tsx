@@ -108,6 +108,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
           </>)}
         </div>
       )}
+      {data.notice && <div className="hint warn">⚠ {data.notice}</div>}
       {visibleJobs.length > 0 && (
         <ul className="jobs">
           {visibleJobs.map(j => (

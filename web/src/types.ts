@@ -17,6 +17,8 @@ export interface GenData extends Record<string, unknown> {
   count: number
   jobs: JobState[]
   handled: string[] // job ids whose result image was already placed on the canvas
+  refIds?: string[] // stable reference numbering of this card: <Picture N> = refIds[N-1]; entries are never reused
+  notice?: string
 }
 
 export interface ImageData extends Record<string, unknown> {
@@ -53,5 +55,5 @@ export interface CanvasActions {
   continueFrom: (imageIds: string[], mode: 'together' | 'each') => void
   preview: (assetId: string) => void
   refCount: (genId: string) => number
-  refsOf: (genId: string) => RefInfo[]
+  refsOf: (genId: string) => (RefInfo | undefined)[]
 }

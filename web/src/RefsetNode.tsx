@@ -18,7 +18,6 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
   const [overSlot, setOverSlot] = useState<string | null>(null)
   const slots = data.slots
   const filledCount = slots.filter(s => s.assetId).length
-  let refNo = 0
 
   /** Upload files in order; the first one fills `startSlot` when it is an empty slot, the rest become new slots. */
   const addFiles = async (files: File[], startSlot?: string | null) => {
@@ -98,8 +97,7 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
         </div>
         {!data.collapsed && (
           <div className="rs-grid nodrag nowheel">
-            {slots.map(slot => {
-              const no = slot.assetId ? ++refNo : 0
+            {slots.map((slot, idx) => {
               return (
                 <div
                   key={slot.id} draggable={!!slot.assetId}
@@ -110,7 +108,7 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
                   onDragLeave={() => setOverSlot(o => (o === slot.id ? null : o))}
                   onDrop={e => onDropOnSlot(e, slot)}
                 >
-                  <div className="rs-tag">{slot.assetId ? `图 ${no}` : '空槽位'}</div>
+                  <div className="rs-tag">{slot.assetId ? `图片 ${idx + 1}` : `槽位 ${idx + 1}`}</div>
                   {slot.assetId ? (
                     <img src={assetUrl(slot.assetId, 320)} alt="" draggable={false} title="双击大图预览；拖动可调整顺序"
                          onDoubleClick={() => canvas.preview(slot.assetId!)} />

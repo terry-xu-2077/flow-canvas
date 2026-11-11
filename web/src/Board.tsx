@@ -50,15 +50,25 @@ function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo
   const out: RefInfo[] = []
   for (const e of edges.filter(e => e.target === genId)) {
     const src = nodes.find(n => n.id === e.source)
-    const add = (r: RefInfo) => { if (!out.some(x => x.assetId === r.assetId)) out.push(r) }
+    const add = (r: RefInfo) => { if (!out.some(x => x.key === r.key)) out.push(r) }
     if (src?.type === 'image') {
       const d = (src as ImageNodeType).data
-      add({ assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
+      add({ key: `n:${src.id}`, assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
     } else if (src?.type === 'refset') {
-      for (const s of (src as RefsetNodeType).data.slots) if (s.assetId) add({ assetId: s.assetId, w: s.w ?? 0, h: s.h ?? 0, note: s.name })
+      for (const s of (src as RefsetNodeType).data.slots) {
+        if (s.assetId) add({ key: `s:${s.id}`, assetId: s.assetId, w: s.w ?? 0, h: s.h ?? 0, note: s.name })
+      }
     }
   }
   return out
+}
+
+/** <Picture N> numbering of a card: refIds keeps every reference it ever had, so a number never moves to another
+ *  image; a reference that is no longer connected leaves a hole (undefined) instead of shifting the others. */
+function numberedRefs(refIds: string[] | undefined, connected: RefInfo[]): (RefInfo | undefined)[] {
+  const known = refIds ?? []
+  const all = [...known, ...connected.map(r => r.key).filter(k => !known.includes(k))]
+  return all.map(k => connected.find(r => r.key === k))
 }
 
 function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
@@ -162,6 +172,20 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       return changed ? next : ns
     })
   }, [loaded, models, maxCount, setNodes])
+
+  // Remember the numbering of every reference connected to a card (new ones get the next free number).
+  useEffect(() => {
+    if (!loaded) return
+    const updates = new Map<string, string[]>()
+    for (const n of nodes) {
+      if (n.type !== 'gen') continue
+      const known = (n as GenNodeType).data.refIds
+      const keys = collectRefs(n.id, nodes, edges).map(r => r.key)
+      const fresh = keys.filter(k => !(known ?? []).includes(k))
+      if (known === undefined || fresh.length) updates.set(n.id, [...(known ?? []), ...fresh])
+    }
+    if (updates.size) setNodes(ns => ns.map(n => (updates.has(n.id) ? ({ ...n, data: { ...n.data, refIds: updates.get(n.id) } } as CanvasNode) : n)))
+  }, [loaded, nodes, edges, setNodes])
 
   // ---- node helpers
   const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
@@ -310,13 +334,32 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const generate = useCallback(async (genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
     if (!node || !node.data.prompt.trim()) return
-    const refs = collectRefs(genId, nodesRef.current, edgesRef.current).map(r => r.assetId)
+    // Submit the images in number order and renumber the tags to match: <Picture N> in the text must name the
+    // same image that ends up as the N-th reference of the request.
+    const numbered = numberedRefs(node.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
+    const refs: string[] = []
+    const position: Record<number, number> = {}
+    numbered.forEach((r, i) => {
+      if (!r) return
+      let p = refs.indexOf(r.assetId)
+      if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
+      position[i + 1] = p + 1
+    })
+    let dropped = 0
+    const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
+      const p = position[Number(n)]
+      if (!p) { dropped++; return '' }
+      return `<Picture ${p}>`
+    })
     try {
       const ids = await api.createJobs({
         board: boardId, node: genId, model: node.data.model, ratio: node.data.ratio, size: node.data.size,
-        prompt: node.data.prompt.trim(), refs, count: node.data.count,
+        prompt, refs, count: node.data.count,
       })
-      patchNode(genId, { jobs: ids.map<JobState>(id => ({ id, status: 'queued', progress: '' })) })
+      patchNode(genId, {
+        jobs: ids.map<JobState>(id => ({ id, status: 'queued', progress: '' })),
+        notice: dropped ? `提示词里有 ${dropped} 处引用的参考图已不存在，提交时已忽略` : '',
+      })
     } catch (e) {
       patchNode(genId, { jobs: [{ id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
     }
@@ -389,8 +432,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [])
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
 
-  const refsOf = useCallback((genId: string) => collectRefs(genId, nodes, edges), [nodes, edges])
-  const refCount = useCallback((genId: string) => refsOf(genId).length, [refsOf])
+  const refsOf = useCallback((genId: string) => {
+    const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
+    return numberedRefs(gen?.data.refIds, collectRefs(genId, nodes, edges))
+  }, [nodes, edges])
+  const refCount = useCallback((genId: string) => collectRefs(genId, nodes, edges).length, [nodes, edges])
 
   const actions = useMemo<CanvasActions>(() => ({
     models, maxCount, patchNode, editSlots, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
