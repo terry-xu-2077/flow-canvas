@@ -209,3 +209,37 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .react-flow__controls-button.on { background: var(--accent); color: #10140a; }
 .react-flow__controls-button.on:hover { background: #cbff55; }
 .guide { position: absolute; pointer-events: none; border-left: 1px dashed #ff5fd2; border-top: 1px dashed #ff5fd2; z-index: 5; }
+
+/* ---- icons */
+.ico { width: 1em; height: 1em; flex: none; vertical-align: -0.14em; }
+.ico-banana { color: #f5d24b; } .ico-collection { color: #8fb8ff; } .ico-image { color: #8fd4c4; }
+.node-title { display: inline-flex; align-items: center; gap: 6px; }
+.dock button .ico { width: 16px; height: 16px; margin-right: 6px; }
+.dock .primary .ico { color: inherit; }
+.toolbar .brand { margin: 0 4px 0 2px; }
+.list h1 { display: flex; align-items: center; gap: 10px; }
+.login h1 { display: flex; align-items: center; gap: 10px; }
+.layers li .ico { margin-right: 4px; }
+.rs-head .ico { width: 16px; height: 16px; }
+.img-meta { display: flex; align-items: center; gap: 4px; }
+
+/* ---- several images dropped at once */
+.drop-backdrop { position: fixed; inset: 0; z-index: 40; }
+.drop-menu { position: fixed; z-index: 41; width: 284px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--panel);
+  border: 1px solid #4a5463; border-radius: 14px; box-shadow: 0 18px 48px #000a; }
+.dm-title { font-weight: 600; padding: 2px 4px; }
+.drop-menu button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 10px; }
+.drop-menu button .ico { width: 20px; height: 20px; }
+.drop-menu button span { display: flex; flex-direction: column; }
+.drop-menu button small { font-size: 11px; color: var(--muted); }
+.drop-menu button.primary small { color: #4a5a1a; }
+
+.foot .primary { display: inline-flex; align-items: center; gap: 6px; }
+.foot .primary .ico-spark { width: 16px; height: 16px; }
+
+/* ---- credits badge */
+.usage { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; padding: 2px 8px; border-radius: 999px;
+  background: var(--panel2); color: #f5d24b; font-weight: 600; font-size: 13px; cursor: default; }
+.usage .ico { width: 13px; height: 13px; }
+.toolbar.who { display: flex; align-items: center; }
+.who .usage { margin-right: 8px; }

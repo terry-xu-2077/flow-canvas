@@ -94,6 +94,16 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         except (FlowError, httpx.HTTPError) as exc:
             raise HTTPException(502, f"无法读取模型列表：{exc}")
 
+    @app.get("/api/usage")
+    async def usage(user: str = user_dep):
+        try:
+            data = await flow.usage()
+        except (FlowError, httpx.HTTPError) as exc:
+            raise HTTPException(502, f"无法读取额度：{exc}")
+        # one shared Flow account for now; per-user allowances can be added here later
+        return {"credits": data.get("credits"), "image_daily": data.get("image_daily") or [], "date": data.get("date"),
+                "scope": "total"}
+
     # ---- boards
     @app.get("/api/boards")
     async def list_boards(user: str = user_dep):

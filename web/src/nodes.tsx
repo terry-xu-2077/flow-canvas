@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { assetUrl, downloadUrl } from './api'
 import { useCanvas } from './CanvasContext'
+import { BananaIcon, ImageIcon, SparkleIcon } from './icons'
 import PromptEditor from './PromptEditor'
 import { RefsetNode } from './RefsetNode'
 import { type GenNodeType, type ImageNodeType } from './types'
@@ -66,7 +67,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
     <div className={`card gen${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
-        <span>生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
+        <span className="node-title"><BananaIcon className="ico-banana" />生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
         <button className="icon nodrag" title="删除卡片" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
       </div>
       <PromptEditor
@@ -79,7 +80,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         </button>
         {running && <button onClick={() => canvas.cancelJobs(id)}>取消</button>}
         <button className="primary" disabled={!canRun} onClick={() => canvas.generate(id)}>
-          {running ? '生成中…' : '生成'}
+          <SparkleIcon className="ico-spark" />{running ? '生成中…' : '生成'}
         </button>
       </div>
       {open && (
@@ -136,7 +137,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
         className="nodrag-img" draggable={false} src={assetUrl(data.assetId, 1280)}
         alt="" onDoubleClick={() => canvas.preview(data.assetId)}
       />
-      <div className="img-meta">{data.w} × {data.h}</div>
+      <div className="img-meta"><ImageIcon className="ico-image" /> {data.w} × {data.h}</div>
       <div className="img-bar nodrag">
         <button title="在右侧新建一张生成卡片，并把这张图作为它的参考图（已连好线），写提示词后点生成即可" onClick={() => canvas.continueFrom([id], 'together')}>以此图生成</button>
         <button title="大图预览（双击图片也可）" onClick={() => canvas.preview(data.assetId)}>预览</button>

@@ -7,7 +7,9 @@ import {
 import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
+import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
 import { nodeTypes } from './nodes'
+import UsageBadge from './UsageBadge'
 import type { RefInfo } from './PromptEditor'
 import {
   GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
@@ -127,6 +129,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [dropMenu, setDropMenu] = useState<{ files: File[]; at?: { x: number; y: number }; x: number; y: number } | null>(null)
   const [snapOn, setSnapOn] = useState(() => localStorage.getItem('fc_snap') === '1')
   const [guides, setGuides] = useState<Guides>(NO_GUIDES)
   const nodesRef = useRef<CanvasNode[]>([])
@@ -272,7 +275,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     id: uid('i'), type: 'image', position: { x, y }, width: IMAGE_WIDTH, height: imgHeight(w, h), data: { assetId, w, h, prompt },
   })
 
-  const addRefset = useCallback((slots: Slot[] = [], at?: { x: number; y: number }) => {
+  const addRefset = useCallback((slots: Slot[] = [], at?: { x: number; y: number }): string => {
     const el = document.querySelector('.react-flow')?.getBoundingClientRect()
     const c = at ?? rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2 - REFSET_WIDTH / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 3 })
     const spot = findFree(nodesRef.current, c.x, c.y, REFSET_WIDTH, 220)
@@ -281,15 +284,68 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       data: { slots: slots.length ? slots : [{ id: uid('s') }, { id: uid('s') }, { id: uid('s') }] },
     }
     setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true } as CanvasNode])
+    return node.id
   }, [rf, setNodes])
 
+  // Replace the chosen images by one collection at their place; edges and <Picture N> numbering move to the slots.
   const mergeIntoRefset = useCallback((imageIds: string[]) => {
     const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
     if (!images.length) return
     const slots: Slot[] = images.map(i => ({ id: uid('s'), assetId: i.data.assetId, w: i.data.w, h: i.data.h }))
-    const x = Math.max(...images.map(i => i.position.x + (i.width ?? IMAGE_WIDTH))) + 80
-    addRefset(slots, { x, y: Math.min(...images.map(i => i.position.y)) })
-  }, [addRefset])
+    const keyMap: Record<string, string> = {}
+    images.forEach((img, i) => { keyMap[`n:${img.id}`] = `s:${slots[i].id}` })
+    const gone = new Set(images.map(i => i.id))
+    const rest = nodesRef.current.filter(n => !gone.has(n.id))
+    const spot = findFree(rest, Math.min(...images.map(i => i.position.x)), Math.min(...images.map(i => i.position.y)), REFSET_WIDTH, 220)
+    const node: RefsetNodeType = { id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH, data: { slots } }
+    setNodes(ns => [
+      ...ns.filter(n => !gone.has(n.id)).map(n => {
+        if (n.type === 'gen' && n.data.refIds) return { ...n, selected: false, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode
+        return n.selected ? { ...n, selected: false } : n
+      }),
+      { ...node, selected: true } as CanvasNode,
+    ])
+    setEdges(es => {
+      const kept: Edge[] = []
+      const wired = new Set<string>()
+      for (const e of es) {
+        if (gone.has(e.source)) {
+          if (!gone.has(e.target) && !wired.has(e.target)) {
+            wired.add(e.target)
+            kept.push({ ...edgeBase, id: uid('e'), source: node.id, target: e.target } as Edge)
+          }
+        } else if (!gone.has(e.target)) kept.push(e)
+      }
+      return kept
+    })
+  }, [setNodes, setEdges])
+
+  // Split a collection back into loose image nodes; every card it fed keeps the same references and numbers.
+  const dissolve = useCallback((id: string) => {
+    const rs = nodesRef.current.find(n => n.id === id) as RefsetNodeType | undefined
+    if (!rs) return
+    const rest = nodesRef.current.filter(n => n.id !== id)
+    const created: ImageNodeType[] = []
+    const keyMap: Record<string, string> = {}
+    rs.data.slots.filter(s => s.assetId).forEach((s, i) => {
+      const w = s.w || 1024, h = s.h || 1024
+      const spot = findFree([...rest, ...created], rs.position.x + (i % 3) * (IMAGE_WIDTH + 24),
+        rs.position.y + Math.floor(i / 3) * (imgHeight(w, h) + 24), IMAGE_WIDTH, imgHeight(w, h))
+      const node = newImageNode(s.assetId!, w, h, spot.x, spot.y)
+      created.push(node)
+      keyMap[`s:${s.id}`] = `n:${node.id}`
+    })
+    setNodes(ns => [
+      ...ns.filter(n => n.id !== id).map(n => (n.type === 'gen' && n.data.refIds
+        ? ({ ...n, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode) : n)),
+      ...created.map(n => ({ ...n, selected: false })),
+    ])
+    setEdges(es => es.flatMap(e => {
+      if (e.target === id) return []
+      if (e.source !== id) return [e]
+      return created.map(c => ({ ...edgeBase, id: uid('e'), source: c.id, target: e.target } as Edge))
+    }))
+  }, [setNodes, setEdges])
 
   const addGenCard = useCallback(() => {
     const el = document.querySelector('.react-flow')?.getBoundingClientRect()
@@ -332,6 +388,18 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
   }, [rf, setNodes])
 
+  // One image goes straight onto the canvas; several ask first (loose images or one collection).
+  const placeImages = useCallback((files: File[], at?: { x: number; y: number }, screen?: { x: number; y: number }) => {
+    const imgs = files.filter(f => f.type.startsWith('image/'))
+    if (imgs.length < 2) { void addImages(imgs, at); return }
+    setDropMenu({ files: imgs, at, x: screen?.x ?? innerWidth / 2 - 130, y: screen?.y ?? innerHeight / 2 - 60 })
+  }, [addImages])
+
+  const addAsRefset = useCallback((files: File[], at?: { x: number; y: number }) => {
+    const id = addRefset(files.map(() => ({ id: uid('s') })), at)
+    void addToRefset(id, files)
+  }, [addRefset, addToRefset])
+
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -341,11 +409,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       e.preventDefault()
       const sets = nodesRef.current.filter(n => n.selected && n.type === 'refset')
       if (sets.length === 1) void addToRefset(sets[0].id, files)
-      else void addImages(files)
+      else placeImages(files)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [addImages, addToRefset])
+  }, [placeImages, addToRefset])
 
   const fitAll = useCallback(() => { void rf.fitView({ duration: 250, padding: 0.2, maxZoom: 1 }) }, [rf])
   const focusNode = useCallback((id: string) => {
@@ -359,7 +427,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       if (t && (['TEXTAREA', 'INPUT', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key.toLowerCase()
-      if (k === 'escape') { setPreviewId(null); return }
+      if (k === 'escape') { setPreviewId(null); setDropMenu(null); return }
       if (previewId) return
       if (k === 'a') { e.preventDefault(); addGenCard() }
       else if (k === 'u') { e.preventDefault(); fileInput.current?.click() }
@@ -461,6 +529,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       next = next.map((n, i) => (i === idx ? ({ ...n, data: { ...n.data, jobs, handled } } as CanvasNode) : n))
     }
     setNodes(added.length ? [...next, ...added] : next)
+    if (updates.some(u => u.status === 'done')) window.dispatchEvent(new Event('fc-usage'))
     if (addedEdges.length) setEdges(es => [...es, ...addedEdges.filter(e => !es.some(x => x.id === e.id))])
   }, [setNodes, setEdges])
 
@@ -499,15 +568,15 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const refCount = useCallback((genId: string) => collectRefs(genId, nodes, edges).length, [nodes, edges])
 
   const actions = useMemo<CanvasActions>(() => ({
-    models, maxCount, patchNode, editSlots, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
-  }), [models, maxCount, patchNode, editSlots, generate, cancelJobs, continueFrom, refCount, refsOf])
+    models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
+  }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     const files = Array.from(e.dataTransfer.files)
-    if (files.length) void addImages(files, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }))
+    if (files.length) placeImages(files, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), { x: e.clientX, y: e.clientY })
   }
 
   if (loadError) return <div className="center-msg">打开画板失败：{loadError} <button onClick={onBack}>返回</button></div>
@@ -542,12 +611,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           )}
           <MiniMap pannable zoomable nodeStrokeWidth={2} />
           <Panel position="top-left" className="toolbar">
+            <BrandMark size={24} />
             <button onClick={onBack} title="返回画板列表">←</button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
           </Panel>
-          <Panel position="top-right" className="toolbar who">{getUser()}</Panel>
+          <Panel position="top-right" className="toolbar who"><UsageBadge />{getUser()}</Panel>
           {layersOpen && (
             <Panel position="top-right" className="layers">
               <div className="layers-head"><strong>图层</strong>
@@ -557,10 +627,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                 {[...nodes].reverse().map(n => (
                   <li key={n.id} className={n.selected ? 'on' : ''} onClick={() => focusNode(n.id)}>
                     {n.type === 'gen'
-                      ? `✦ 生成卡片 · ${((n as GenNodeType).data.prompt || '空').slice(0, 16)}`
+                      ? <><BananaIcon className="ico-banana" /> 生成卡片 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
                       : n.type === 'refset'
-                        ? `▤ 参考集合 · ${(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张`
-                        : `▣ 图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}
+                        ? <><CollectionIcon className="ico-collection" /> 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
+                        : <><ImageIcon className="ico-image" /> 图片 · {(n as ImageNodeType).data.w}×{(n as ImageNodeType).data.h}</>}
                   </li>
                 ))}
               </ul>
@@ -568,19 +638,19 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           )}
           <Panel position="bottom-center" className="dock">
             <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建生成卡片（A）">
-              ＋ 生成卡片 <kbd>A</kbd>
+              <BananaIcon /> 生成卡片 <kbd>A</kbd>
             </button>
             <button onClick={() => addRefset()} title="新建参考集合（R）：把多张参考图放在一起，连给任意生成卡片">
-              ＋ 参考集合 <kbd>R</kbd>
+              <CollectionIcon /> 参考集合 <kbd>R</kbd>
             </button>
             <button onClick={() => fileInput.current?.click()} title="上传图片（U）">
-              上传图片{busyUploads ? `（${busyUploads}）` : ''} <kbd>U</kbd>
+              <ImageIcon /> 上传图片{busyUploads ? `（${busyUploads}）` : ''} <kbd>U</kbd>
             </button>
             <span className="sep" />
             <button onClick={fitAll} title="适应画面（F）">适应画面 <kbd>F</kbd></button>
             <button className={layersOpen ? 'on' : ''} onClick={() => setLayersOpen(o => !o)} title="图层（L）">图层 <kbd>L</kbd></button>
             <input ref={fileInput} type="file" accept="image/*" multiple hidden
-                   onChange={e => { void addImages(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+                   onChange={e => { placeImages(Array.from(e.target.files ?? [])); e.target.value = '' }} />
           </Panel>
           {modelError && (
             <Panel position="top-center" className="banner">
@@ -606,6 +676,20 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           <div className="empty">
             点「＋ 生成卡片」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
           </div>
+        )}
+        {dropMenu && (
+          <>
+            <div className="drop-backdrop" onPointerDown={() => setDropMenu(null)} />
+            <div className="drop-menu" style={{ left: Math.max(8, Math.min(dropMenu.x, innerWidth - 292)), top: Math.max(8, Math.min(dropMenu.y, innerHeight - 150)) }}>
+              <div className="dm-title">放入 {dropMenu.files.length} 张图片</div>
+              <button onClick={() => { void addImages(dropMenu.files, dropMenu.at); setDropMenu(null) }}>
+                <ImageIcon className="ico-image" /><span>散开<small>每张一个图片节点</small></span>
+              </button>
+              <button className="primary" onClick={() => { addAsRefset(dropMenu.files, dropMenu.at); setDropMenu(null) }}>
+                <CollectionIcon /><span>集合<small>放进一个参考集合</small></span>
+              </button>
+            </div>
+          </>
         )}
         {previewId && (
           <div className="lightbox" onClick={() => setPreviewId(null)}>

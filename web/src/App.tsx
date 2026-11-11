@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, clearUser, getUser, setUser, type BoardMeta } from './api'
 import Board from './Board'
+import { BrandMark } from './icons'
+import UsageBadge from './UsageBadge'
 
 function useHashBoard(): [string | null, (id: string | null) => void] {
   const read = () => (location.hash.match(/^#\/b\/([\w-]+)/) || [])[1] ?? null
@@ -18,7 +20,7 @@ function Login({ onDone }: { onDone: () => void }) {
   const ok = /^[\w一-鿿\- ]{1,32}$/.test(name.trim())
   return (
     <div className="center-msg login">
-      <h1>Flow 画布</h1>
+      <h1><BrandMark size={30} /> Flow 画布</h1>
       <p>输入你的名字，画板会按名字分开保存</p>
       <form onSubmit={e => { e.preventDefault(); if (ok) { setUser(name.trim()); onDone() } }}>
         <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="名字（1–32 个字符）" />
@@ -45,8 +47,8 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
   return (
     <div className="list">
       <header>
-        <h1>Flow 画布</h1>
-        <span className="who">{getUser()} <button onClick={onLogout}>切换用户</button></span>
+        <h1><BrandMark size={30} /> Flow 画布</h1>
+        <span className="who"><UsageBadge /> {getUser()} <button onClick={onLogout}>切换用户</button></span>
       </header>
       {error && <div className="banner">{error}</div>}
       <div className="grid">

@@ -88,6 +88,7 @@ class FlowClient:
         self.timeout = timeout
         self._http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(30.0, read=timeout))
         self._catalog: Optional[tuple[float, list[dict]]] = None
+        self._usage: Optional[tuple[float, dict]] = None
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -114,6 +115,17 @@ class FlowClient:
         catalog = build_catalog(ids)
         self._catalog = (time.time(), catalog)
         return catalog
+
+    async def usage(self, max_age: float = 10.0) -> dict:
+        """Flow credits and today's image counters (flow2api /v1/usage)."""
+        if self._usage and time.time() - self._usage[0] < max_age:
+            return self._usage[1]
+        r = await self._http.get(self.base + "/v1/usage", headers=self._headers(), timeout=20)
+        if r.status_code >= 400:
+            raise FlowError(f"读取额度失败 HTTP {r.status_code}")
+        data = r.json()
+        self._usage = (time.time(), data)
+        return data
 
     async def upload_ref(self, content: bytes, cached_ref: Optional[str]) -> str:
         """Return a ref://id for these bytes, re-using a still-valid earlier upload."""

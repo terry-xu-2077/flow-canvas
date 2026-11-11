@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { api, assetUrl } from './api'
 import { useCanvas } from './CanvasContext'
+import { CollectionIcon } from './icons'
 import type { RefsetNodeType, Slot } from './types'
 
 const uid = () => `s${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
@@ -87,9 +88,12 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
         <div className="rs-head">
           <button className="icon nodrag" title={data.collapsed ? '展开' : '收起'}
                   onClick={() => canvas.patchNode(id, { collapsed: !data.collapsed })}>{data.collapsed ? '▸' : '▾'}</button>
+          <CollectionIcon className="ico-collection" />
           <strong>参考集合</strong>
           <span className="rs-count">{filledCount} 张{busy ? ` · 上传中 ${busy}` : ''}</span>
           <span className="grow" />
+          <button className="nodrag" title="解散集合：拆成独立的图片节点，连线和提示词里的编号保持不变"
+                  onClick={() => canvas.dissolve(id)}>解散</button>
           {!data.collapsed && (
             <button className="nodrag" title="添加空槽位" onClick={() => canvas.editSlots(id, ss => [...ss, { id: uid() }])}>＋</button>
           )}

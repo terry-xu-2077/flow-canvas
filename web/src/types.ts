@@ -50,6 +50,7 @@ export interface CanvasActions {
   maxCount: number
   patchNode: (id: string, patch: Record<string, unknown>) => void
   editSlots: (id: string, fn: (slots: Slot[]) => Slot[]) => void
+  dissolve: (id: string) => void
   generate: (id: string) => void
   cancelJobs: (id: string) => void
   continueFrom: (imageIds: string[], mode: 'together' | 'each') => void

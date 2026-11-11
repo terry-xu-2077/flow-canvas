@@ -40,6 +40,9 @@ class FakeFlow:
                                                       for i in ids]})
         if path == "/health":
             return httpx.Response(200, json={"backend_running": True})
+        if path == "/v1/usage":
+            self.usage_calls = getattr(self, "usage_calls", 0) + 1
+            return httpx.Response(200, json={"date": "2026-11-11", "credits": 250, "image_daily": [{"name": "Nano", "used": 3, "limit": 1000}]})
         if path == "/v1/media/upload":
             self.uploads.append(request.content)
             return httpx.Response(200, json={"id": f"up{len(self.uploads)}"})
@@ -270,3 +273,14 @@ def test_picture_tags_outside_the_reference_list_are_removed(env):
     assert fake.chats[0]["messages"][0]["content"][0]["text"] == "图片1和和"
     wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "无参考 <Picture 1> 图"}).json()["jobs"][0])
     assert fake.chats[1]["messages"][0]["content"] == "无参考  图"
+
+
+def test_usage_is_passed_through_and_cached(env):
+    client, fake, _ = env
+    first = client.get("/api/usage").json()
+    assert first["credits"] == 250 and first["scope"] == "total"
+    assert first["image_daily"] == [{"name": "Nano", "used": 3, "limit": 1000}]
+    client.get("/api/usage")
+    client.get("/api/usage")
+    assert fake.usage_calls == 1  # the short cache absorbs bursts
+    assert client.get("/api/usage", headers={"X-User": ""}).status_code == 401
