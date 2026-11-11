@@ -388,3 +388,13 @@ button, select, input { border-radius: var(--r-ctl); }
 .tile.new.split { padding: 0 6px; }
 .tile.new.split button { padding: 8px 9px; white-space: nowrap; font-size: 14px; }
 .tile.new.split .split-sep { white-space: nowrap; }
+
+/* board list header uses the same 16px edge offset and 32px control height as the board's top bar */
+.list { max-width: none; margin: 0; padding: 16px; }
+.list header { min-height: 32px; margin-bottom: 16px; }
+.list h1 { gap: 8px; font-size: 20px; }
+.list h1 .brand { width: 32px; height: 32px; }
+.list header .who button { height: 32px; padding: 0 14px; border-radius: 14px; }
+.list .grid { margin-top: 0; }
+.list header .who { gap: 8px; }
+.list header .who .usage { margin-right: 8px; }
