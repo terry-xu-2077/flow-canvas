@@ -3,6 +3,7 @@ import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xy
 import { assetUrl, downloadUrl } from './api'
 import { useCanvas } from './CanvasContext'
 import PromptEditor from './PromptEditor'
+import { RefsetNode } from './RefsetNode'
 import { type GenNodeType, type ImageNodeType } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -147,4 +148,4 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   )
 }
 
-export const nodeTypes = { gen: GenNode, image: ImageNode }
+export const nodeTypes = { gen: GenNode, image: ImageNode, refset: RefsetNode }

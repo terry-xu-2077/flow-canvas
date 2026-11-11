@@ -10,7 +10,7 @@ import { CanvasContext } from './CanvasContext'
 import { nodeTypes } from './nodes'
 import type { RefInfo } from './PromptEditor'
 import {
-  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, type CanvasActions, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
+  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
 } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -24,6 +24,7 @@ function nodeBox(n: CanvasNode) {
     const width = w ?? IMAGE_WIDTH
     return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
   }
+  if (n.type === 'refset') return { w: w ?? REFSET_WIDTH, h: n.height ?? n.measured?.height ?? 200 }
   return { w: w ?? GEN_WIDTH, h: n.height ?? n.measured?.height ?? GEN_EST_HEIGHT }
 }
 
@@ -49,9 +50,13 @@ function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo
   const out: RefInfo[] = []
   for (const e of edges.filter(e => e.target === genId)) {
     const src = nodes.find(n => n.id === e.source)
-    if (src?.type !== 'image') continue
-    const d = (src as ImageNodeType).data
-    if (!out.some(r => r.assetId === d.assetId)) out.push({ assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
+    const add = (r: RefInfo) => { if (!out.some(x => x.assetId === r.assetId)) out.push(r) }
+    if (src?.type === 'image') {
+      const d = (src as ImageNodeType).data
+      add({ assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
+    } else if (src?.type === 'refset') {
+      for (const s of (src as RefsetNodeType).data.slots) if (s.assetId) add({ assetId: s.assetId, w: s.w ?? 0, h: s.h ?? 0, note: s.name })
+    }
   }
   return out
 }
@@ -99,8 +104,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const d = b.data || {}
       // Boards saved before nodes were resizable have no stored size: give them the default one.
       const loadedNodes = ((d.nodes || []) as CanvasNode[]).map(n => {
-        const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : GEN_WIDTH)
-        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : GEN_HEIGHT)
+        const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : n.type === 'refset' ? REFSET_WIDTH : GEN_WIDTH)
+        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? undefined : GEN_HEIGHT)
         return { ...n, width, height } as CanvasNode
       })
       const loadedEdges = (d.edges || []) as Edge[]
@@ -163,6 +168,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     setNodes(ns => ns.map(n => (n.id === id ? ({ ...n, data: { ...n.data, ...patch } } as CanvasNode) : n)))
   }, [setNodes])
 
+  const editSlots = useCallback((id: string, fn: (slots: Slot[]) => Slot[]) => {
+    setNodes(ns => ns.map(n => (n.id === id && n.type === 'refset'
+      ? ({ ...n, data: { ...n.data, slots: fn(n.data.slots) } } as CanvasNode) : n)))
+  }, [setNodes])
+
   const newGenNode = useCallback((x: number, y: number, prompt = ''): GenNodeType => {
     const m = models[0]
     return {
@@ -178,6 +188,25 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     id: uid('i'), type: 'image', position: { x, y }, width: IMAGE_WIDTH, height: imgHeight(w, h), data: { assetId, w, h, prompt },
   })
 
+  const addRefset = useCallback((slots: Slot[] = [], at?: { x: number; y: number }) => {
+    const el = document.querySelector('.react-flow')?.getBoundingClientRect()
+    const c = at ?? rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2 - REFSET_WIDTH / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 3 })
+    const spot = findFree(nodesRef.current, c.x, c.y, REFSET_WIDTH, 220)
+    const node: RefsetNodeType = {
+      id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH,
+      data: { slots: slots.length ? slots : [{ id: uid('s') }, { id: uid('s') }, { id: uid('s') }] },
+    }
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true } as CanvasNode])
+  }, [rf, setNodes])
+
+  const mergeIntoRefset = useCallback((imageIds: string[]) => {
+    const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
+    if (!images.length) return
+    const slots: Slot[] = images.map(i => ({ id: uid('s'), assetId: i.data.assetId, w: i.data.w, h: i.data.h }))
+    const x = Math.max(...images.map(i => i.position.x + (i.width ?? IMAGE_WIDTH))) + 80
+    addRefset(slots, { x, y: Math.min(...images.map(i => i.position.y)) })
+  }, [addRefset])
+
   const addGenCard = useCallback(() => {
     const el = document.querySelector('.react-flow')?.getBoundingClientRect()
     const center = rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 2 })
@@ -186,6 +215,19 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [rf, setNodes, newGenNode])
 
   // ---- uploads (button, drag & drop, paste)
+  const addToRefset = useCallback(async (id: string, files: File[]) => {
+    for (const file of files.filter(f => f.type.startsWith('image/'))) {
+      try {
+        const info = await api.uploadAsset(file)
+        const fill = { assetId: info.id, w: info.w, h: info.h, name: file.name }
+        editSlots(id, ss => {
+          const free = ss.findIndex(s => !s.assetId)
+          return free >= 0 ? ss.map((s, i) => (i === free ? { ...s, ...fill } : s)) : [...ss, { id: uid('s'), ...fill }]
+        })
+      } catch (e) { alert(`上传失败：${(e as Error).message}`) }
+    }
+  }, [editSlots])
+
   const addImages = useCallback(async (files: File[], at?: { x: number; y: number }) => {
     const images = files.filter(f => f.type.startsWith('image/'))
     if (!images.length) return
@@ -211,11 +253,15 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return
       const files = Array.from(e.clipboardData?.files ?? [])
-      if (files.some(f => f.type.startsWith('image/'))) { e.preventDefault(); void addImages(files) }
+      if (!files.some(f => f.type.startsWith('image/'))) return
+      e.preventDefault()
+      const sets = nodesRef.current.filter(n => n.selected && n.type === 'refset')
+      if (sets.length === 1) void addToRefset(sets[0].id, files)
+      else void addImages(files)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [addImages])
+  }, [addImages, addToRefset])
 
   const fitAll = useCallback(() => { void rf.fitView({ duration: 250, padding: 0.2, maxZoom: 1 }) }, [rf])
   const focusNode = useCallback((id: string) => {
@@ -233,12 +279,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       if (previewId) return
       if (k === 'a') { e.preventDefault(); addGenCard() }
       else if (k === 'u') { e.preventDefault(); fileInput.current?.click() }
+      else if (k === 'r') { e.preventDefault(); addRefset() }
       else if (k === 'f') { e.preventDefault(); fitAll() }
       else if (k === 'l') { e.preventDefault(); setLayersOpen(o => !o) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [addGenCard, fitAll, previewId])
+  }, [addGenCard, addRefset, fitAll, previewId])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[], mode: 'together' | 'each') => {
@@ -337,7 +384,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const isValidConnection = useCallback((c: Connection | Edge) => {
     const s = nodesRef.current.find(n => n.id === c.source)
     const t = nodesRef.current.find(n => n.id === c.target)
-    if (s?.type !== 'image' || t?.type !== 'gen') return false
+    if ((s?.type !== 'image' && s?.type !== 'refset') || t?.type !== 'gen') return false
     return !edgesRef.current.some(e => e.source === c.source && e.target === c.target)
   }, [])
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
@@ -346,8 +393,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const refCount = useCallback((genId: string) => refsOf(genId).length, [refsOf])
 
   const actions = useMemo<CanvasActions>(() => ({
-    models, maxCount, patchNode, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
-  }), [models, maxCount, patchNode, generate, cancelJobs, continueFrom, refCount, refsOf])
+    models, maxCount, patchNode, editSlots, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
+  }), [models, maxCount, patchNode, editSlots, generate, cancelJobs, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
 
@@ -392,7 +439,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                   <li key={n.id} className={n.selected ? 'on' : ''} onClick={() => focusNode(n.id)}>
                     {n.type === 'gen'
                       ? `✦ 生成卡片 · ${((n as GenNodeType).data.prompt || '空').slice(0, 16)}`
-                      : `▣ 图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}
+                      : n.type === 'refset'
+                        ? `▤ 参考集合 · ${(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张`
+                        : `▣ 图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}
                   </li>
                 ))}
               </ul>
@@ -401,6 +450,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           <Panel position="bottom-center" className="dock">
             <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建生成卡片（A）">
               ＋ 生成卡片 <kbd>A</kbd>
+            </button>
+            <button onClick={() => addRefset()} title="新建参考集合（R）：把多张参考图放在一起，连给任意生成卡片">
+              ＋ 参考集合 <kbd>R</kbd>
             </button>
             <button onClick={() => fileInput.current?.click()} title="上传图片（U）">
               上传图片{busyUploads ? `（${busyUploads}）` : ''} <kbd>U</kbd>
@@ -425,6 +477,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               {selectedImages.length > 1 && (
                 <button onClick={() => continueFrom(selectedImages.map(n => n.id), 'each')}>每张图各建一张卡片</button>
               )}
+              <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
+                合并为参考集合
+              </button>
             </Panel>
           )}
         </ReactFlow>
