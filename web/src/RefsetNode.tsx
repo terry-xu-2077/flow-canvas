@@ -101,7 +101,7 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
               return (
                 <div
                   key={slot.id} draggable={!!slot.assetId}
-                  className={`rs-slot nodrag${slot.assetId ? '' : ' empty'}${overSlot === slot.id ? ' over' : ''}`}
+                  className={`rs-slot nodrag${slot.assetId ? '' : ' rs-empty'}${overSlot === slot.id ? ' over' : ''}`}
                   onDragStart={e => { dragId.current = slot.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-slot', slot.id) }}
                   onDragEnd={() => { dragId.current = null; setOverSlot(null) }}
                   onDragOver={e => { e.preventDefault(); e.stopPropagation(); setOverSlot(slot.id) }}

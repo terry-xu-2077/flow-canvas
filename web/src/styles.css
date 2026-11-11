@@ -60,7 +60,7 @@ textarea { width: 100%; resize: vertical; line-height: 1.45; }
 .jobs { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
 .jobs .failed { color: var(--danger); }
 .card.image { overflow: hidden; padding: 0; }
-.card.image img { display: block; width: 100%; height: auto; background: #0c0e12; cursor: zoom-in; }
+.card.image img { display: block; width: 100%; height: auto; background: #0c0e12; }
 .img-bar { display: flex; gap: 6px; padding: 6px 8px; align-items: center; }
 .img-bar a { color: var(--text); font-size: 13px; padding: 5px 8px; text-decoration: none; border: 1px solid var(--line); border-radius: 8px; }
 .img-bar button { font-size: 13px; padding: 4px 8px; }
@@ -167,7 +167,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .rs-hint { grid-column: 1 / -1; padding: 10px 0; text-align: center; }
 .rs-slot { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line);
   border-radius: 10px; background: var(--bg); }
-.rs-slot.empty { border-style: dashed; }
+.rs-slot.rs-empty { border-style: dashed; }
 .rs-slot.over { border-color: var(--accent); background: #26301a; }
 .rs-tag { align-self: flex-start; font-size: 11px; padding: 1px 7px; border-radius: 5px; background: var(--panel2); color: var(--text); }
 .rs-slot img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #0c0e12; border-radius: 6px; cursor: grab; display: block; }
@@ -194,3 +194,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 .rs-head { cursor: grab; }
 .rs-head button { cursor: pointer; }
+
+.rs-slot { cursor: default; }
+.rs-slot img { cursor: grab; }
+.card.image img { cursor: inherit; }
