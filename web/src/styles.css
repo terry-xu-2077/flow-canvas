@@ -212,7 +212,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 /* ---- icons */
 .ico { width: 1em; height: 1em; flex: none; vertical-align: -0.14em; }
-.ico-banana { color: #f5d24b; } .ico-collection { color: #8fb8ff; } .ico-image { color: #8fd4c4; }
+.ico-collection { color: #8fb8ff; } .ico-image { color: #8fd4c4; }
 .node-title { display: inline-flex; align-items: center; gap: 6px; }
 .dock button .ico { width: 16px; height: 16px; margin-right: 6px; }
 .dock .primary .ico { color: inherit; }
@@ -250,3 +250,9 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 /* ---- selection bar follows the selected images */
 .selbar-float { position: absolute; z-index: 15; transform: translateX(-50%); white-space: nowrap; box-shadow: 0 8px 24px #0007; }
+
+/* ---- selection bar buttons carry an icon; the supplied banana is blue */
+.selbar button { display: inline-flex; align-items: center; gap: 6px; }
+.selbar button .ico { width: 16px; height: 16px; }
+.ico-banana { color: #5385d9; }
+.selbar .primary .ico { color: inherit; }

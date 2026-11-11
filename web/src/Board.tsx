@@ -440,22 +440,15 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [addGenCard, addRefset, fitAll, previewId])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
-  const continueFrom = useCallback((imageIds: string[], mode: 'together' | 'each') => {
+  const continueFrom = useCallback((imageIds: string[]) => {
     const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
     if (!images.length) return
-    const groups = mode === 'together' ? [images] : images.map(i => [i])
-    const created: CanvasNode[] = []
-    const newEdges: Edge[] = []
-    for (const group of groups) {
-      const x = Math.max(...group.map(i => i.position.x)) + IMAGE_WIDTH + 120
-      const y = group.reduce((s, i) => s + i.position.y, 0) / group.length
-      const spot = findFree([...nodesRef.current, ...created], x, y, GEN_WIDTH, GEN_EST_HEIGHT)
-      const g = newGenNode(spot.x, spot.y)
-      created.push(g)
-      for (const img of group) newEdges.push({ ...edgeBase, id: uid('e'), source: img.id, target: g.id } as Edge)
-    }
-    setNodes(ns => [...ns, ...created])
-    setEdges(es => [...es, ...newEdges])
+    const x = Math.max(...images.map(i => i.position.x)) + IMAGE_WIDTH + 120
+    const y = images.reduce((s, i) => s + i.position.y, 0) / images.length
+    const spot = findFree(nodesRef.current, x, y, GEN_WIDTH, GEN_EST_HEIGHT)
+    const gen = newGenNode(spot.x, spot.y)
+    setNodes(ns => [...ns, gen])
+    setEdges(es => [...es, ...images.map(img => ({ ...edgeBase, id: uid('e'), source: img.id, target: gen.id } as Edge)),])
   }, [newGenNode, setNodes, setEdges])
 
   // ---- generation
@@ -682,14 +675,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         {selBar && (
           <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
             已选 {selectedImages.length} 张图
-            <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id), 'together')}>
-              作为参考，新建 1 张卡片
+            <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id))}
+                    title="在右侧新建一张生成卡片，并把选中的图作为它的参考图（已连好线）">
+              <BananaIcon />新建生成卡片
             </button>
-            {selectedImages.length > 1 && (
-              <button onClick={() => continueFrom(selectedImages.map(n => n.id), 'each')}>每张图各建一张卡片</button>
-            )}
             <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
-              合并为参考集合
+              <CollectionIcon />合并为集合
             </button>
           </div>
         )}
