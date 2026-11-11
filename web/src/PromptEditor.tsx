@@ -1,6 +1,6 @@
 /* Prompt editor with <Picture N> chips and an @ menu (same idea and tag format as the CloudGen ComfyUI editor).
  * The stored value is always the raw text; chips are only how it is shown. */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { assetUrl } from './api'
 
@@ -79,7 +79,6 @@ export default function PromptEditor(props: {
   const el = useRef<HTMLDivElement>(null)
   const emitted = useRef(value)         // last value this editor produced itself
   const rangeRef = useRef<Range | null>(null)
-  const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<Menu | null>(null)
   const refsKey = refs.map(r => r?.assetId ?? '-').join(',')
   const shownKey = useRef('')
@@ -91,14 +90,14 @@ export default function PromptEditor(props: {
   useEffect(() => {
     const node = el.current
     if (!node) return
-    const key = `${raw}|${refsKey}`
+    const key = refsKey
     const typing = document.activeElement === node && value === emitted.current && shownKey.current === key
     if (typing) return
     shownKey.current = key
-    if (raw) { node.replaceChildren(); appendText(node, value) } else renderRich(node, value, refs)
-  }, [value, refsKey, raw]) // eslint-disable-line react-hooks/exhaustive-deps
+    renderRich(node, value, refs)
+  }, [value, refsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const read = () => (raw ? (el.current?.innerText ?? '') : serialize(el.current!))
+  const read = () => serialize(el.current!)
   const emit = () => { const v = read(); emitted.current = v; onChange(v) }
 
   const insertNodes = (range: Range, nodes: Node[]) => {
@@ -153,7 +152,7 @@ export default function PromptEditor(props: {
 
   const onInput = (e: React.FormEvent) => {
     emit()
-    if (raw || (e.nativeEvent as InputEvent).isComposing) return
+    if ((e.nativeEvent as InputEvent).isComposing) return
     const hit = caretHit()
     if (hit) {
       rangeRef.current = hit.range
@@ -189,7 +188,6 @@ export default function PromptEditor(props: {
     const text = e.clipboardData.getData('text/plain')
     const sel = getSelection()
     if (!sel?.rangeCount) return
-    if (raw) { document.execCommand('insertText', false, text); return }
     const tmp = document.createElement('div')
     renderRich(tmp, text, refs)
     insertNodes(sel.getRangeAt(0), [...tmp.childNodes])
@@ -229,29 +227,21 @@ export default function PromptEditor(props: {
       const node = el.current
       if (!node || document.activeElement === node) return
       setMenu(null)
-      shownKey.current = `${raw}|${refsKey}`
-      if (raw) { node.replaceChildren(); appendText(node, emitted.current) } else renderRich(node, emitted.current, refs)
+      shownKey.current = refsKey
+      renderRich(node, emitted.current, refs)
     }, 120)
   }
 
-  const toggleRaw = useCallback(() => { setMenu(null); emit(); setRaw(r => !r) }, [raw]) // eslint-disable-line
-
   const present = refs.filter(Boolean).length
-  const status = present ? `${present} 图` : '输入 @ 引用参考图'
 
   return (
     <div className="pe-wrap nodrag nowheel nopan">
       <div
-        ref={el} className={`pe${raw ? ' is-raw' : ''}`} contentEditable suppressContentEditableWarning spellCheck={false}
+        ref={el} className="pe" contentEditable suppressContentEditableWarning spellCheck={false}
         data-placeholder="描述你想生成的画面…（@ 引用参考图，Ctrl+Enter 生成）"
         onInput={onInput} onKeyDown={onKeyDown} onKeyUp={e => e.stopPropagation()} onPaste={onPaste} onCopy={onCopy}
         onPointerDown={onPointerDown} onBlur={onBlur}
       />
-      <div className="pe-tools">
-        <span className="pe-state">{status}</span>
-        <button type="button" className="pe-view" title={raw ? '切回胶囊显示' : '显示纯文本原文'}
-                onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onClick={toggleRaw}>{raw ? '@' : '</>'}</button>
-      </div>
       {menu && createPortal(
         <div className="at-menu" style={{ left: menu.x, top: menu.y }} onPointerDown={e => { e.preventDefault(); e.stopPropagation() }}>
           <div className="at-head"><b>{menu.chip ? '替换引用' : '引用参考'}</b><span>↑↓ 选择 · Enter 插入 · Esc 关闭</span></div>
