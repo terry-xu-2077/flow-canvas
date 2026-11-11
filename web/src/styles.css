@@ -61,10 +61,6 @@ textarea { width: 100%; resize: vertical; line-height: 1.45; }
 .jobs .failed { color: var(--danger); }
 .card.image { overflow: hidden; padding: 0; }
 .card.image img { display: block; width: 100%; height: auto; background: #0c0e12; }
-.img-bar { display: flex; gap: 6px; padding: 6px 8px; align-items: center; }
-.img-bar a { color: var(--text); font-size: 13px; padding: 5px 8px; text-decoration: none; border: 1px solid var(--line); border-radius: 8px; }
-.img-bar button { font-size: 13px; padding: 4px 8px; }
-.img-bar .icon { margin-left: auto; }
 .react-flow__edge.out .react-flow__edge-path { stroke-dasharray: 6 5; stroke: #5a6676; }
 .react-flow__edge-path { stroke: #8fa0b5; }
 .react-flow__handle { width: 12px; height: 12px; background: var(--panel2); border: 2px solid #8fa0b5; }
@@ -113,12 +109,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 .card.image { position: relative; }
 .img-meta { position: absolute; top: 8px; right: 10px; font-size: 11px; color: #fffc; text-shadow: 0 1px 3px #000; opacity: 0; transition: opacity .15s; pointer-events: none; }
-.img-bar { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, #000b); padding: 18px 8px 8px;
-  opacity: 0; transition: opacity .15s; }
-.card.image:hover .img-bar, .card.image.selected .img-bar,
 .card.image:hover .img-meta, .card.image.selected .img-meta { opacity: 1; }
-.img-bar button, .img-bar a { background: #1b2027cc; backdrop-filter: blur(4px); }
-
 .dock button { white-space: nowrap; display: inline-flex; align-items: center; }
 
 /* ---- resizable nodes */
@@ -257,3 +248,8 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .ico-banana, .ico-collection, .ico-image { color: var(--accent); } /* theme colour */
 .selbar .primary .ico { color: inherit; }
 .dock button:not(.primary) .ico { color: var(--accent); }
+
+/* download link inside the selection bar looks like its buttons */
+.selbar a.btn { display: inline-flex; align-items: center; padding: 5px 12px; color: var(--text); text-decoration: none;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+.selbar a.btn:hover { border-color: #5a6676; }

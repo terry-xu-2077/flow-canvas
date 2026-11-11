@@ -679,9 +679,16 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                     title="在右侧新建一张生成卡片，并把选中的图作为它的参考图（已连好线）">
               <BananaIcon />新建生成卡片
             </button>
-            <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
-              <CollectionIcon />合并为集合
-            </button>
+            {selectedImages.length === 1 ? (
+              <>
+                <a className="btn" href={downloadUrl((selectedImages[0] as ImageNodeType).data.assetId)} title="下载原图">下载</a>
+                <button className="icon" title="删除（Delete 键也可）" onClick={() => rf.deleteElements({ nodes: [{ id: selectedImages[0].id }] })}>✕</button>
+              </>
+            ) : (
+              <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
+                <CollectionIcon />合并为集合
+              </button>
+            )}
           </div>
         )}
         {dropMenu && (
