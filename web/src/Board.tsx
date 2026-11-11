@@ -260,8 +260,36 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [setNodes])
 
   const editSlots = useCallback((id: string, fn: (slots: Slot[]) => Slot[]) => {
-    setNodes(ns => ns.map(n => (n.id === id && n.type === 'refset'
-      ? ({ ...n, data: { ...n.data, slots: fn(n.data.slots) } } as CanvasNode) : n)))
+    setNodes(ns => {
+      const old = ns.find(n => n.id === id && n.type === 'refset') as RefsetNodeType | undefined
+      if (!old) return ns
+      const slots = fn(old.data.slots)
+      // When slots are reordered, the cards fed by this collection renumber so that every image keeps its tag
+      // text in the prompt but the number follows the image's new position (图3 -> 图1 when it moved to the front).
+      const oldKeys = old.data.slots.filter(s => s.assetId).map(s => `s:${s.id}`)
+      const newKeys = slots.filter(s => s.assetId).map(s => `s:${s.id}`)
+      const sameSet = oldKeys.length === newKeys.length && oldKeys.every(k => newKeys.includes(k))
+      const reordered = sameSet && oldKeys.some((k, i) => k !== newKeys[i])
+      const fed = new Set(edgesRef.current.filter(e => e.source === id).map(e => e.target))
+      return ns.map(n => {
+        if (n.id === id) return { ...n, data: { ...n.data, slots } } as CanvasNode
+        if (!reordered || n.type !== 'gen' || !fed.has(n.id)) return n
+        const ids = (n as GenNodeType).data.refIds
+        if (!ids) return n
+        const mine = ids.map((k, i) => (oldKeys.includes(k) ? i : -1)).filter(i => i >= 0)
+        const order = newKeys.filter(k => ids.includes(k))
+        if (mine.length !== order.length) return n
+        const nextIds = [...ids]
+        mine.forEach((pos, j) => { nextIds[pos] = order[j] })
+        const map = new Map<number, number>()
+        ids.forEach((k, i) => { const to = nextIds.indexOf(k); if (to !== i) map.set(i + 1, to + 1) })
+        const prompt = (n as GenNodeType).data.prompt.replace(/<Picture\s+(\d+)>/gi, (m, d) => {
+          const to = map.get(Number(d))
+          return to ? `<Picture ${to}>` : m
+        })
+        return { ...n, data: { ...n.data, refIds: nextIds, prompt } } as CanvasNode
+      })
+    })
   }, [setNodes])
 
   const newGenNode = useCallback((x: number, y: number, prompt = ''): GenNodeType => {
