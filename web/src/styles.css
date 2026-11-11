@@ -247,3 +247,6 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .usage.hot .usage-bar i { background: #ff7a7a; }
 .toolbar.who { display: flex; align-items: center; }
 .who .usage { margin-right: 8px; }
+
+/* ---- selection bar follows the selected images */
+.selbar-float { position: absolute; z-index: 15; transform: translateX(-50%); white-space: nowrap; box-shadow: 0 8px 24px #0007; }

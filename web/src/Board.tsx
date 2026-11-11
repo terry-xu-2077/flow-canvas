@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, ViewportPortal,
-  addEdge, useEdgesState, useNodesState, useReactFlow,
+  addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -572,6 +572,22 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
+  const viewport = useViewport()
+  const selBar = (() => {
+    if (!selectedImages.length) return null
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+    for (const n of selectedImages) {
+      const b = nodeBox(n)
+      x1 = Math.min(x1, n.position.x); y1 = Math.min(y1, n.position.y)
+      x2 = Math.max(x2, n.position.x + b.w); y2 = Math.max(y2, n.position.y + b.h)
+    }
+    const below = y2 * viewport.zoom + viewport.y + 14
+    const above = y1 * viewport.zoom + viewport.y - 14 - 46
+    return {
+      left: Math.min(Math.max(((x1 + x2) / 2) * viewport.zoom + viewport.x, 230), innerWidth - 230),
+      top: below + 46 > innerHeight - 80 ? Math.max(8, above) : below,
+    }
+  })()
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -657,24 +673,24 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               无法读取模型列表：{modelError} <button onClick={loadModels}>重试</button>
             </Panel>
           )}
-          {selectedImages.length > 0 && (
-            <Panel position="bottom-center" className="selbar" style={{ marginBottom: 66 }}>
-              已选 {selectedImages.length} 张图
-              <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id), 'together')}>
-                作为参考，新建 1 张卡片
-              </button>
-              {selectedImages.length > 1 && (
-                <button onClick={() => continueFrom(selectedImages.map(n => n.id), 'each')}>每张图各建一张卡片</button>
-              )}
-              <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
-                合并为参考集合
-              </button>
-            </Panel>
-          )}
         </ReactFlow>
         {loaded && nodes.length === 0 && (
           <div className="empty">
             点「＋ 生成卡片」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
+          </div>
+        )}
+        {selBar && (
+          <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
+            已选 {selectedImages.length} 张图
+            <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id), 'together')}>
+              作为参考，新建 1 张卡片
+            </button>
+            {selectedImages.length > 1 && (
+              <button onClick={() => continueFrom(selectedImages.map(n => n.id), 'each')}>每张图各建一张卡片</button>
+            )}
+            <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
+              合并为参考集合
+            </button>
           </div>
         )}
         {dropMenu && (
