@@ -398,3 +398,6 @@ button, select, input { border-radius: var(--r-ctl); }
 .list .grid { margin-top: 0; }
 .list header .who { gap: 8px; }
 .list header .who .usage { margin-right: 8px; }
+
+/* collection slots keep a bounded size: when the node grows, more slots are laid out per row instead of the slots scaling up */
+.rs-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 210px)); justify-content: start; }
