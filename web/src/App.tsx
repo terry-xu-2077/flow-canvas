@@ -73,10 +73,12 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
       </header>
       {error && <div className="banner">{error}</div>}
       <div className="grid">
-        <button className="tile new" onClick={create}>＋ 新建画板</button>
-        <button className="tile new" disabled={importing} onClick={() => zipInput.current?.click()}>
-          {importing ? '导入中…' : '⤒ 导入 zip'}
-        </button>
+        <div className="tile new split">
+          <button className="split-main" onClick={create}>＋ 新建画板</button>
+          <button className="split-side" disabled={importing} title="从 zip 导入图片，新建一个画板" onClick={() => zipInput.current?.click()}>
+            {importing ? '导入中…' : '⤒ 导入 zip'}
+          </button>
+        </div>
         <input ref={zipInput} type="file" accept=".zip,application/zip" hidden onChange={async e => {
           const file = e.target.files?.[0]
           e.target.value = ''

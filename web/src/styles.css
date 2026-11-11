@@ -377,3 +377,10 @@ button, select, input { border-radius: var(--r-ctl); }
 
 /* download button at the bottom-right of a board tile */
 .tile .tile-dl { top: auto; bottom: 8px; right: 8px; }
+
+/* new-board tile split into "new" and "import zip" with a divider */
+.tile.new.split { flex-direction: row; padding: 0; cursor: default; align-items: stretch; overflow: hidden; }
+.tile.new.split button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 0; }
+.tile.new.split .split-main { flex: 1; }
+.tile.new.split .split-side { padding: 0 16px; border-left: 1px solid #2c343f; font-size: 13px; }
+.tile.new.split button:hover { background: #ffffff0d; color: #dfe6ee; }
