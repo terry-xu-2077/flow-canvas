@@ -347,3 +347,10 @@ button, select, input { border-radius: var(--r-ctl); }
 .react-flow__controls { display: flex; flex-direction: column; gap: 8px; box-shadow: none; background: transparent; border: none; overflow: visible; }
 .react-flow__controls-button { border: 1px solid var(--line); border-radius: 12px; background: #1b2027; width: 30px; height: 30px; }
 .react-flow__controls-button:hover { background: #2c333d; }
+
+/* ---- quota card is exactly as tall as the controls on the left (32px) */
+.usage { position: relative; box-sizing: border-box; height: 32px; min-width: 212px; padding: 0 12px; gap: 0; justify-content: center; margin-right: 8px; }
+.usage-row { line-height: 1; padding-bottom: 4px; }
+.usage-bar { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 2px; }
+.user-pill { display: inline-flex; align-items: center; box-sizing: border-box; height: 32px; padding: 0 14px; }
+.react-flow__panel.toolbar.who { align-items: center; }

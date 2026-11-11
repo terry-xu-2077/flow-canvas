@@ -34,7 +34,7 @@ export default function UsageBadge() {
   return (
     <span className={`usage${pct >= 90 ? ' hot' : pct >= 70 ? ' warm' : ''}`} title={tip}>
       <span className="usage-row">
-        <span className="usage-name">{quota ? quota.name : ''}</span>
+        <span className="usage-name">{quota ? quota.name.replace(/\s*\/.*$/, '') : ''}</span>
         <span className="usage-num">{quota ? `${quota.used} / ${quota.limit}` : '…'}</span>
       </span>
       <span className="usage-bar"><i style={{ width: `${fill}%` }} /></span>
