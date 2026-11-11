@@ -84,24 +84,24 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
           if (files.length) { e.preventDefault(); e.stopPropagation(); void addFiles(files) }
         }}
       >
-        <div className="rs-head nodrag">
-          <button className="icon" title={data.collapsed ? '展开' : '收起'}
+        <div className="rs-head">
+          <button className="icon nodrag" title={data.collapsed ? '展开' : '收起'}
                   onClick={() => canvas.patchNode(id, { collapsed: !data.collapsed })}>{data.collapsed ? '▸' : '▾'}</button>
           <strong>参考集合</strong>
           <span className="rs-count">{filledCount} 张{busy ? ` · 上传中 ${busy}` : ''}</span>
           <span className="grow" />
           {!data.collapsed && (
-            <button title="添加空槽位" onClick={() => canvas.editSlots(id, ss => [...ss, { id: uid() }])}>＋</button>
+            <button className="nodrag" title="添加空槽位" onClick={() => canvas.editSlots(id, ss => [...ss, { id: uid() }])}>＋</button>
           )}
-          <button className="icon" title="删除集合" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
+          <button className="icon nodrag" title="删除集合" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
         </div>
         {!data.collapsed && (
-          <div className="rs-grid nodrag nowheel">
+          <div className="rs-grid nowheel">
             {slots.map((slot, idx) => {
               return (
                 <div
                   key={slot.id} draggable={!!slot.assetId}
-                  className={`rs-slot${slot.assetId ? '' : ' empty'}${overSlot === slot.id ? ' over' : ''}`}
+                  className={`rs-slot nodrag${slot.assetId ? '' : ' empty'}${overSlot === slot.id ? ' over' : ''}`}
                   onDragStart={e => { dragId.current = slot.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-slot', slot.id) }}
                   onDragEnd={() => { dragId.current = null; setOverSlot(null) }}
                   onDragOver={e => { e.preventDefault(); e.stopPropagation(); setOverSlot(slot.id) }}
