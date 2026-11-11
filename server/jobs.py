@@ -9,7 +9,7 @@ from typing import Optional
 from .assets import AssetError, asset_path, save_image_bytes
 from .config import Settings
 from .db import Store
-from .flow import FlowClient, FlowError
+from .flow import FlowClient, FlowError, mentions_to_text
 
 FINAL = {"done", "failed", "cancelled"}
 
@@ -86,7 +86,7 @@ class JobRunner:
         async def on_progress(text: str) -> None:
             await self._progress(job_id, text)
 
-        url = await self.flow.generate(job["model"], job["prompt"], ref_ids, on_progress)
+        url = await self.flow.generate(job["model"], mentions_to_text(job["prompt"]), ref_ids, on_progress)
         await self._progress(job_id, "下载结果…")
         data = await self.flow.download(url)
         saved = save_image_bytes(self.settings, self.store, data)

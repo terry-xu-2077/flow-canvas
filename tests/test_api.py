@@ -248,3 +248,15 @@ def test_disabled_sizes_and_count_limit(tmp_path):
         assert client.post("/api/jobs", json={**ok, "size": "2K"}).status_code == 400
         assert client.post("/api/jobs", json={**ok, "count": 3}).status_code == 400
         assert client.post("/api/jobs", json={**ok, "count": 2}).status_code == 200
+
+
+def test_picture_tags_become_plain_references(env):
+    client, fake, _ = env
+    a1 = client.post("/api/assets", content=png((9, 9, 9))).json()["id"]
+    body = {"model": "gemini-3.1-flash-image", "prompt": "把<Picture 1>里的猫放进<Picture 2>2个人的房间", "refs": [a1]}
+    wait_job(client, client.post("/api/jobs", json=body).json()["jobs"][0])
+    sent = fake.chats[0]["messages"][0]["content"][0]["text"]
+    assert sent == "把图片1里的猫放进图片2 2个人的房间"
+    job_id = client.post("/api/jobs", json={**body, "prompt": "原样 <picture   3> 文本"}).json()["jobs"][0]
+    wait_job(client, job_id)
+    assert fake.chats[1]["messages"][0]["content"][0]["text"] == "原样 图片3 文本"

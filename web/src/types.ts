@@ -1,5 +1,6 @@
 import type { Node } from '@xyflow/react'
 import type { ModelInfo } from './api'
+import type { RefInfo } from './PromptEditor'
 
 export interface JobState {
   id: string
@@ -42,4 +43,5 @@ export interface CanvasActions {
   continueFrom: (imageIds: string[], mode: 'together' | 'each') => void
   preview: (assetId: string) => void
   refCount: (genId: string) => number
+  refsOf: (genId: string) => RefInfo[]
 }

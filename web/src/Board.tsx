@@ -8,6 +8,7 @@ import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
 import { nodeTypes } from './nodes'
+import type { RefInfo } from './PromptEditor'
 import {
   GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, type CanvasActions, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
 } from './types'
@@ -42,6 +43,18 @@ function findFree(nodes: CanvasNode[], x: number, y: number, w: number, h: numbe
 }
 
 const edgeBase: Partial<Edge> = { style: { strokeWidth: 2 } }
+
+/** References of a generation card in edge order; <Picture N> in the prompt means the N-th entry. */
+function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo[] {
+  const out: RefInfo[] = []
+  for (const e of edges.filter(e => e.target === genId)) {
+    const src = nodes.find(n => n.id === e.source)
+    if (src?.type !== 'image') continue
+    const d = (src as ImageNodeType).data
+    if (!out.some(r => r.assetId === d.assetId)) out.push({ assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
+  }
+  return out
+}
 
 function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
   return {
@@ -250,11 +263,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const generate = useCallback(async (genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
     if (!node || !node.data.prompt.trim()) return
-    const refs: string[] = []
-    for (const e of edgesRef.current.filter(e => e.target === genId)) {
-      const src = nodesRef.current.find(n => n.id === e.source)
-      if (src?.type === 'image' && !refs.includes((src as ImageNodeType).data.assetId)) refs.push((src as ImageNodeType).data.assetId)
-    }
+    const refs = collectRefs(genId, nodesRef.current, edgesRef.current).map(r => r.assetId)
     try {
       const ids = await api.createJobs({
         board: boardId, node: genId, model: node.data.model, ratio: node.data.ratio, size: node.data.size,
@@ -333,18 +342,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [])
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
 
-  const refCount = useCallback((genId: string) => {
-    const ids = new Set<string>()
-    for (const e of edges.filter(e => e.target === genId)) {
-      const src = nodes.find(n => n.id === e.source)
-      if (src?.type === 'image') ids.add(e.source)
-    }
-    return ids.size
-  }, [nodes, edges])
+  const refsOf = useCallback((genId: string) => collectRefs(genId, nodes, edges), [nodes, edges])
+  const refCount = useCallback((genId: string) => refsOf(genId).length, [refsOf])
 
   const actions = useMemo<CanvasActions>(() => ({
-    models, maxCount, patchNode, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount,
-  }), [models, maxCount, patchNode, generate, cancelJobs, continueFrom, refCount])
+    models, maxCount, patchNode, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
+  }), [models, maxCount, patchNode, generate, cancelJobs, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
 

@@ -17,6 +17,7 @@ RATIO_TO_ASPECT = {v: k for k, v in ASPECT_TO_RATIO.items()}
 URL_RE = re.compile(r"""https?://[^\s"'<>()\]]+""")
 MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 CAPTCHA_RE = re.compile(r"打码|验证码|reCAPTCHA|captcha", re.I)
+PICTURE_TAG_RE = re.compile(r"<Picture\s+(\d+)>(?=([0-9A-Za-z])?)", re.I)
 CACHE_TTL = 600.0
 
 
@@ -26,6 +27,12 @@ class FlowError(Exception):
 
 def _is_error_line(line: str) -> bool:
     return line.startswith(("错误", "❌")) or line.lower().startswith("error") or "生成失败" in line
+
+
+def mentions_to_text(prompt: str) -> str:
+    """<Picture N> tags (as written by the prompt editor) -> 图片N, N = upload order of the references."""
+    # a trailing space keeps "图片1" + "2个人" from reading as 图片12
+    return PICTURE_TAG_RE.sub(lambda m: f"图片{int(m.group(1))}" + (" " if m.group(2) else ""), prompt)
 
 
 def friendly_progress(line: str) -> str:

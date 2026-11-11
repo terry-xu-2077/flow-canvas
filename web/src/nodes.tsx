@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { assetUrl, downloadUrl } from './api'
 import { useCanvas } from './CanvasContext'
+import PromptEditor from './PromptEditor'
 import { type GenNodeType, type ImageNodeType } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -67,10 +68,9 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         <span>生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
         <button className="icon nodrag" title="删除卡片" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
       </div>
-      <textarea
-        className="nodrag nowheel" placeholder="描述你想生成的画面…（Ctrl+Enter 生成）"
-        value={data.prompt} onChange={e => patch({ prompt: e.target.value })}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canRun) canvas.generate(id) }}
+      <PromptEditor
+        value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}
+        onSubmit={() => { if (canRun) canvas.generate(id) }}
       />
       <div className="foot nodrag">
         <button className="summary" onClick={() => setOpen(o => !o)} title="图像设置">
