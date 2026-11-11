@@ -362,9 +362,15 @@ button, select, input { border-radius: var(--r-ctl); }
 .react-flow__edge.selected .react-flow__edge-path { stroke: #c9d4e0; }
 
 /* existing users on the login page */
-.user-list { margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; }
-.user-list small { color: #7d8896; }
-.user-list > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .user-chip { border-radius: 999px; padding: 6px 14px; background: #1b2027; border: 1px solid #2c343f; color: #dfe6ee; cursor: pointer; }
 .user-chip:hover { border-color: #8fa0b5; }
 .user-chip em { font-style: normal; color: #7d8896; margin-left: 8px; font-size: 12px; }
+
+/* login: user picker + create-user dialog */
+.user-pick { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 460px; margin-top: 6px; }
+.user-chip.add { border-style: dashed; color: #9aa7b6; }
+.modal-back { position: fixed; inset: 0; background: #0009; display: grid; place-items: center; z-index: 50; }
+.modal { width: 320px; display: flex; flex-direction: column; gap: 14px; padding: 20px; border-radius: 16px;
+  background: #171c22; border: 1px solid #2c343f; box-shadow: 0 20px 50px #000a; }
+.modal input { width: 100%; box-sizing: border-box; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }

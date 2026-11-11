@@ -16,28 +16,33 @@ function useHashBoard(): [string | null, (id: string | null) => void] {
 }
 
 function Login({ onDone }: { onDone: () => void }) {
+  const [users, setUsers] = useState<{ user: string; boards: number }[] | null>(null)
+  const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const ok = /^[\w一-鿿\- ]{1,32}$/.test(name.trim())
-  const [users, setUsers] = useState<{ user: string; boards: number }[]>([])
-  useEffect(() => { api.users().then(setUsers).catch(() => {}) }, [])
+  useEffect(() => { api.users().then(setUsers).catch(() => setUsers([])) }, [])
+  const enter = (u: string) => { setUser(u); onDone() }
   return (
     <div className="center-msg login">
       <h1><BrandMark size={30} /> Flow 画布</h1>
-      <p>输入你的名字，画板会按名字分开保存</p>
-      <form onSubmit={e => { e.preventDefault(); if (ok) { setUser(name.trim()); onDone() } }}>
-        <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="名字（1–32 个字符）" />
-        <button className="primary" disabled={!ok}>进入</button>
-      </form>
-      {users.length > 0 && (
-        <div className="user-list">
-          <small>已有用户，点击进入</small>
-          <div>
-            {users.map(u => (
-              <button key={u.user} className="user-chip" onClick={() => { setUser(u.user); onDone() }}>
-                {u.user}<em>{u.boards}</em>
-              </button>
-            ))}
-          </div>
+      <p>选择用户，画板会按用户分开保存</p>
+      <div className="user-pick">
+        {users?.map(u => (
+          <button key={u.user} className="user-chip" onClick={() => enter(u.user)}>{u.user}<em>{u.boards}</em></button>
+        ))}
+        <button className="user-chip add" onClick={() => { setName(''); setCreating(true) }}>＋ 创建用户</button>
+      </div>
+      {creating && (
+        <div className="modal-back" onMouseDown={() => setCreating(false)}>
+          <form className="modal" onMouseDown={e => e.stopPropagation()}
+                onSubmit={e => { e.preventDefault(); if (ok) enter(name.trim()) }}>
+            <strong>创建用户</strong>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="名字（1–32 个字符）" />
+            <div className="modal-actions">
+              <button type="button" onClick={() => setCreating(false)}>取消</button>
+              <button className="primary" disabled={!ok}>创建并进入</button>
+            </div>
+          </form>
         </div>
       )}
     </div>
