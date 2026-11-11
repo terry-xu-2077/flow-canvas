@@ -75,7 +75,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         onSubmit={() => { if (canRun) canvas.generate(id) }}
       />
       <div className="foot nodrag">
-        <button className="summary" onClick={() => setOpen(o => !o)} title="图像设置">
+        <button className={`summary${open ? " open" : ""}`} onClick={() => setOpen(o => !o)} title="图像设置">
           {model?.name ?? '…'} · {data.ratio} · {data.size} · {data.count} 张 <span className="caret">▾</span>
         </button>
         {running && <button onClick={() => canvas.cancelJobs(id)}>取消</button>}

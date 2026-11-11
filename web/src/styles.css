@@ -255,3 +255,40 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .selbar a.btn { display: inline-flex; align-items: center; padding: 5px 12px; color: var(--text); text-decoration: none;
   background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
 .selbar a.btn:hover { border-color: #5a6676; }
+
+/* ================= refined shapes (rounder, Lovart-like) ================= */
+:root { --r-card: 22px; --r-panel: 22px; --r-ctl: 12px; }
+button, select, input { border-radius: var(--r-ctl); }
+.card { border-radius: var(--r-card); }
+.card.image { border-radius: 16px; }
+.card.refset { border-radius: var(--r-card); }
+.rs-slot { border-radius: 16px; }
+.rs-slot img, .rs-add { border-radius: 12px; }
+.toolbar, .selbar, .dock, .layers, .usage { border-radius: var(--r-panel); }
+.usage { border-radius: 14px; }
+.toolbar button, .selbar button, .selbar a.btn, .dock button { border-radius: 14px; }
+.board-name { border-radius: 14px; }
+.at-menu, .drop-menu, .pop { border-radius: 24px; border-color: #ffffff1c; }
+.drop-menu button, .at-row { border-radius: 16px; }
+.at-thumb { border-radius: 12px; }
+.models button { border-radius: 16px; }
+.ratios button { border-radius: 16px; }
+.seg button { border-radius: 999px; }
+.layers li { border-radius: 12px; }
+.pchip { border-radius: 8px; }
+.tile { border-radius: 22px; }
+.react-flow__controls { border-radius: 14px; overflow: hidden; }
+.react-flow__minimap { border-radius: 16px; overflow: hidden; }
+
+/* ================= generation card: prompt, settings row and card are one surface ================= */
+.card.gen { background: #1d232b; }
+.pe, .pe:focus { background: transparent; border-color: transparent; }
+.foot .summary { background: transparent; border-color: transparent; border-radius: 999px; padding: 6px 12px; color: var(--muted); }
+.foot .summary:hover, .foot .summary.open { background: #ffffff12; color: var(--text); }
+.pe-view { border-radius: 8px; }
+
+/* ================= dock: the lit button is a lighter grey, not lime ================= */
+.dock button.primary { background: #2c333d; border-color: transparent; color: var(--text); font-weight: 500; }
+.dock button.primary:hover:not(:disabled) { background: #363e4a; border-color: transparent; }
+.dock .primary .ico { color: var(--accent); }
+.dock .primary kbd { color: var(--muted); border-color: var(--line); }
