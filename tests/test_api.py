@@ -29,6 +29,8 @@ class FakeFlow:
         self.chats: list[dict] = []
         self.media_alive = True
         self.fail_with: str | None = None
+        self.status_chunks: list = []
+        self.no_result = False
         self.result_png = png((10, 120, 220), (320, 200))
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -53,6 +55,10 @@ class FakeFlow:
             self.chats.append(body)
             if self.fail_with:
                 chunks = [{"error": {"message": self.fail_with}}]
+            elif self.status_chunks:
+                chunks = list(self.status_chunks)
+                if not self.no_result:
+                    chunks.append({"choices": [{"delta": {"content": f"![Generated Image](http://localhost:9999/tmp/r{len(self.chats)}.png)"}}]})
             else:
                 chunks = [{"choices": [{"delta": {"content": "✨ 图片生成任务已启动\n"}}]},
                           {"choices": [{"delta": {"content": "生成进度: 50%\n"}}]},
@@ -284,3 +290,34 @@ def test_usage_is_passed_through_and_cached(env):
     client.get("/api/usage")
     assert fake.usage_calls == 1  # the short cache absorbs bursts
     assert client.get("/api/usage", headers={"X-User": ""}).status_code == 401
+
+
+def test_status_codes_are_formatted_by_this_app(env):
+    client, fake, _ = env
+    fake.status_chunks = [
+        {"status": {"code": "queued", "params": {"active": 4, "position": 2}}, "choices": [{"delta": {"reasoning_content": "⏳ legacy text\n"}}]},
+        {"status": {"code": "captcha_submit", "params": {}}, "choices": [{"delta": {"reasoning_content": "正在进行打码验证并提交图片生成请求...\n"}}]},
+        {"status": {"code": "progress", "params": {"percent": 40}}, "choices": [{"delta": {"reasoning_content": "生成进度: 约 40%\n"}}]},
+    ]
+    seen = []
+    orig = client.app.state.runner._progress
+
+    async def spy(job_id, text):
+        seen.append(text)
+        await orig(job_id, text)
+
+    client.app.state.runner._progress = spy
+    job = wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"}).json()["jobs"][0])
+    assert job["status"] == "done"
+    assert "排队中：您排在第 2 位（4 个任务正在生成）" in seen
+    assert "生成中 约 40%" in seen
+    assert "正在生成中…" in seen            # captcha detail is not shown
+    assert not any("legacy" in t or "打码" in t for t in seen)
+
+
+def test_error_status_code_fails_the_job(env):
+    client, fake, _ = env
+    fake.status_chunks = [{"status": {"code": "error", "params": {"message": "没有可用的Token"}}, "choices": [{"delta": {"reasoning_content": "错误: 没有可用的Token\n"}}]}]
+    fake.no_result = True
+    job = wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"}).json()["jobs"][0])
+    assert job["status"] == "failed" and "没有可用的Token" in job["error"]

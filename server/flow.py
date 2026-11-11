@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .status import format_status
+
 IMG_RE = re.compile(
     r"^(gemini-[\d.]+-[a-z-]*?image)-(landscape|portrait|square|four-three|three-four)(?:-(2k|4k))?$")
 ASPECT_TO_RATIO = {"landscape": "16:9", "portrait": "9:16", "square": "1:1",
@@ -177,6 +179,17 @@ class FlowClient:
                 if obj.get("error"):
                     err = obj["error"]
                     errors.append(str(err.get("message") if isinstance(err, dict) else err))
+                    continue
+                status = obj.get("status")
+                if isinstance(status, dict) and status.get("code"):
+                    # newer flow2api: a message code + params, formatted here (the text in the same chunk is ignored)
+                    kind, shown = format_status(str(status["code"]), status.get("params"))
+                    if kind == "error":
+                        errors.append(shown)
+                    elif shown and shown != last:
+                        last = shown
+                        if on_progress:
+                            await on_progress(shown)
                     continue
                 for ch in obj.get("choices") or []:
                     delta = ch.get("delta") or ch.get("message") or {}
