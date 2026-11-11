@@ -9,6 +9,7 @@ import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } fro
 import { CanvasContext } from './CanvasContext'
 import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
 import { nodeTypes } from './nodes'
+import { edgeTypes } from './DeletableEdge'
 import UsageBadge from './UsageBadge'
 import type { RefInfo } from './PromptEditor'
 import {
@@ -673,7 +674,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     <CanvasContext.Provider value={actions}>
       <div className="board" onDrop={onDrop} onDragOver={e => e.preventDefault()}>
         <ReactFlow
-          nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+          nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
           onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
