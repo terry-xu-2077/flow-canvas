@@ -619,6 +619,19 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     return !edgesRef.current.some(e => e.source === c.source && e.target === c.target)
   }, [])
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
+  // Releasing a line anywhere on a node (not just on its small handle) connects to it: dragging from a card's
+  // left side onto a reference image, or from an image's right side onto a card, both create the same edge.
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, state: { isValid: boolean | null; fromNode: { id: string } | null; fromHandle: { type: string } | null }) => {
+    if (state.isValid || !state.fromNode || !state.fromHandle) return
+    const pt = 'changedTouches' in event ? event.changedTouches[0] : event
+    const el = document.elementFromPoint(pt.clientX, pt.clientY)?.closest('.react-flow__node')
+    const otherId = el?.getAttribute('data-id')
+    if (!otherId || otherId === state.fromNode.id) return
+    const c: Connection = state.fromHandle.type === 'target'
+      ? { source: otherId, target: state.fromNode.id, sourceHandle: null, targetHandle: null }
+      : { source: state.fromNode.id, target: otherId, sourceHandle: null, targetHandle: null }
+    if (isValidConnection(c)) onConnect(c)
+  }, [isValidConnection, onConnect])
 
   const refsOf = useCallback((genId: string) => {
     const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
@@ -662,7 +675,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         <ReactFlow
           nodes={nodes} edges={edges} nodeTypes={nodeTypes}
           onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
-          onConnect={onConnect} isValidConnection={isValidConnection}
+          onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
           minZoom={0.1} maxZoom={2} selectionOnDrag panOnDrag={[1, 2]} panActivationKeyCode="Space"
           selectionKeyCode={null} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
