@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
-import { BoltIcon } from './icons'
 
-/** Flow account credits, shown next to the user name. Refreshes every minute and shortly after a job finishes. */
+interface Quota { used: number; limit: number }
+
+/** Today's Nano Banana 2.1 allowance (one shared Flow account), shown next to the user name.
+ *  Refreshes every minute and shortly after a job finishes. */
 export default function UsageBadge() {
-  const [credits, setCredits] = useState<number | null | undefined>(undefined)
+  const [quota, setQuota] = useState<Quota | null | undefined>(undefined)
   const [tip, setTip] = useState('')
 
   useEffect(() => {
@@ -13,9 +15,10 @@ export default function UsageBadge() {
     const load = () => {
       api.usage().then(u => {
         if (dead) return
-        setCredits(u.credits)
-        const daily = u.image_daily.map(d => `${d.name}：今日 ${d.used}/${d.limit}`).join('\n')
-        setTip(`Flow 总额度：${u.credits ?? '未知'} 积分（所有用户共用）${daily ? `\n${daily}` : ''}`)
+        const main = u.image_daily.find(d => d.name.includes('2.1'))
+        setQuota(main ? { used: main.used, limit: main.limit } : null)
+        const lines = u.image_daily.map(d => `${d.name}：今日已用 ${d.used} / ${d.limit}`)
+        setTip([...lines, '（所有用户共用同一个 Flow 账号，按天计算）'].join('\n'))
       }).catch(() => { if (!dead) setTip('额度暂时读取失败') })
     }
     const soon = () => { clearTimeout(timer); timer = setTimeout(load, 1500) }
@@ -25,9 +28,13 @@ export default function UsageBadge() {
     return () => { dead = true; clearInterval(iv); clearTimeout(timer); window.removeEventListener('fc-usage', soon) }
   }, [])
 
+  if (quota === null) return null
+  const pct = quota ? Math.min(100, Math.round((quota.used / Math.max(1, quota.limit)) * 100)) : 0
+  const fill = quota && quota.used > 0 ? Math.max(pct, 3) : 0 // a little used should still show
   return (
-    <span className="usage" title={tip}>
-      <BoltIcon />{credits === undefined ? '…' : credits === null ? '—' : credits.toLocaleString()}
+    <span className={`usage${pct >= 90 ? ' hot' : pct >= 70 ? ' warm' : ''}`} title={tip}>
+      <span className="usage-text">{quota ? `${quota.used} / ${quota.limit}` : '…'}</span>
+      <span className="usage-bar"><i style={{ width: `${fill}%` }} /></span>
     </span>
   )
 }

@@ -237,9 +237,13 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .foot .primary { display: inline-flex; align-items: center; gap: 6px; }
 .foot .primary .ico-spark { width: 16px; height: 16px; }
 
-/* ---- credits badge */
-.usage { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; padding: 2px 8px; border-radius: 999px;
-  background: var(--panel2); color: #f5d24b; font-weight: 600; font-size: 13px; cursor: default; }
-.usage .ico { width: 13px; height: 13px; }
+/* ---- daily quota badge (text + progress bar) */
+.usage { display: inline-flex; flex-direction: column; gap: 3px; margin-right: 10px; padding: 3px 8px; border-radius: 10px;
+  background: var(--panel2); cursor: default; min-width: 84px; }
+.usage-text { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.1; white-space: nowrap; }
+.usage-bar { display: block; height: 4px; border-radius: 4px; background: #ffffff1a; overflow: hidden; }
+.usage-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width .4s; }
+.usage.warm .usage-bar i { background: #ffd37a; }
+.usage.hot .usage-bar i { background: #ff7a7a; }
 .toolbar.who { display: flex; align-items: center; }
 .who .usage { margin-right: 8px; }
