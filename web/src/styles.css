@@ -212,7 +212,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 /* ---- icons */
 .ico { width: 1em; height: 1em; flex: none; vertical-align: -0.14em; }
-.ico-collection { color: #8fb8ff; } .ico-image { color: #8fd4c4; }
+.ico-image { color: #8fd4c4; }
 .node-title { display: inline-flex; align-items: center; gap: 6px; }
 .dock button .ico { width: 16px; height: 16px; margin-right: 6px; }
 .dock .primary .ico { color: inherit; }
@@ -254,5 +254,5 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 /* ---- selection bar buttons carry an icon; the supplied banana is blue */
 .selbar button { display: inline-flex; align-items: center; gap: 6px; }
 .selbar button .ico { width: 16px; height: 16px; }
-.ico-banana { color: #5385d9; }
+.ico-banana, .ico-collection { color: var(--accent); } /* theme colour */
 .selbar .primary .ico { color: inherit; }
