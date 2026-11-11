@@ -136,7 +136,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
       />
       <div className="img-meta">{data.w} × {data.h}</div>
       <div className="img-bar nodrag">
-        <button title="以此图为参考，新建生成卡片" onClick={() => canvas.continueFrom([id], 'together')}>继续生成</button>
+        <button title="在右侧新建一张生成卡片，并把这张图作为它的参考图（已连好线），写提示词后点生成即可" onClick={() => canvas.continueFrom([id], 'together')}>以此图生成</button>
         <button title="大图预览（双击图片也可）" onClick={() => canvas.preview(data.assetId)}>预览</button>
         <a title="下载原图" href={downloadUrl(data.assetId)}>下载</a>
         <button className="icon" title="删除" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
