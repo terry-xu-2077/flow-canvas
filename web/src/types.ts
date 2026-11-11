@@ -30,10 +30,12 @@ export type ImageNodeType = Node<ImageData, 'image'>
 export type CanvasNode = GenNodeType | ImageNodeType
 
 export const GEN_WIDTH = 340
+export const GEN_HEIGHT = 300
 export const IMAGE_WIDTH = 280
 
 export interface CanvasActions {
   models: ModelInfo[]
+  maxCount: number
   patchNode: (id: string, patch: Record<string, unknown>) => void
   generate: (id: string) => void
   cancelJobs: (id: string) => void

@@ -38,6 +38,18 @@ class BoardBody(BaseModel):
     data: Optional[dict] = None
 
 
+def allowed_catalog(settings: Settings, catalog: list[dict]) -> list[dict]:
+    """Drop the models and resolutions the admin switched off in config.json."""
+    out = []
+    for m in catalog:
+        if m["key"] in settings.disabled_models:
+            continue
+        sizes = [s for s in m["sizes"] if s not in settings.disabled_sizes]
+        if sizes:
+            out.append({**m, "sizes": sizes})
+    return out
+
+
 def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] = None) -> FastAPI:
     settings = settings or load_settings()
     store = Store(settings.db_path)
@@ -77,7 +89,8 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     @app.get("/api/models")
     async def models(refresh: bool = False):
         try:
-            return {"models": await flow.models(refresh=refresh)}
+            catalog = await flow.models(refresh=refresh)
+            return {"models": allowed_catalog(settings, catalog), "max_count": settings.max_count}
         except (FlowError, httpx.HTTPError) as exc:
             raise HTTPException(502, f"无法读取模型列表：{exc}")
 
@@ -145,6 +158,12 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     # ---- jobs
     @app.post("/api/jobs")
     async def create_jobs(body: JobRequest, user: str = user_dep):
+        if body.model in settings.disabled_models:
+            raise HTTPException(400, "该模型已被管理员关闭")
+        if body.size.strip().upper() in settings.disabled_sizes:
+            raise HTTPException(400, f"{body.size} 分辨率已被管理员关闭")
+        if body.count > settings.max_count:
+            raise HTTPException(400, f"一次最多生成 {settings.max_count} 张")
         try:
             mid = model_id(body.model, body.ratio, body.size)
         except FlowError as exc:

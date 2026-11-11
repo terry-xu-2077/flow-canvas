@@ -21,6 +21,10 @@ class Settings:
     # gate (image_max_concurrency) that queues the rest, so this is only a safety net.
     max_parallel_jobs: int = 16
     max_upload_bytes: int = 30 * 1024 * 1024
+    # Options switched off for everyone (they are hidden in the UI and refused by the API).
+    disabled_models: tuple = ()   # model family keys, e.g. "gemini-3.1-flash-lite-image"
+    disabled_sizes: tuple = ()    # e.g. "4K"
+    max_count: int = 4            # most images one card may ask for at once
 
     @property
     def assets_dir(self) -> Path:
@@ -44,6 +48,10 @@ def load_settings(path: Path | None = None) -> Settings:
                       ("max_upload_bytes", int)):
         if raw.get(key) is not None:
             setattr(s, key, cast(raw[key]))
+    s.disabled_models = tuple(str(x).strip() for x in (raw.get("disabled_models") or []) if str(x).strip())
+    s.disabled_sizes = tuple(str(x).strip().upper() for x in (raw.get("disabled_sizes") or []) if str(x).strip())
+    if raw.get("max_count") is not None:
+        s.max_count = max(1, min(8, int(raw["max_count"])))
     if raw.get("data_dir"):
         d = Path(raw["data_dir"])
         s.data_dir = d if d.is_absolute() else ROOT / d

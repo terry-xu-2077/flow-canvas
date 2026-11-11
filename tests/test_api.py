@@ -221,3 +221,30 @@ def test_unfinished_jobs_fail_on_restart(tmp_path):
         pass
     job = app.state.store.get_job("a" * 16)
     assert job["status"] == "failed" and "中断" in job["error"]
+
+
+def test_disabled_options_are_hidden_and_refused(tmp_path):
+    fake = FakeFlow()
+    settings = Settings(flow_base_url=BASE, flow_api_key="k", data_dir=tmp_path / "data",
+                        disabled_models=("gemini-3.1-flash-image",), max_count=2)
+    flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
+    with TestClient(create_app(settings, flow)) as client:
+        client.headers["X-User"] = urllib.parse.quote("小明")
+        assert client.get("/api/models").json() == {"models": [], "max_count": 2}
+        r = client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"})
+        assert r.status_code == 400 and "关闭" in r.json()["error"]
+
+
+def test_disabled_sizes_and_count_limit(tmp_path):
+    fake = FakeFlow()
+    settings = Settings(flow_base_url=BASE, flow_api_key="k", data_dir=tmp_path / "data",
+                        disabled_sizes=("2K",), max_count=2)
+    flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
+    with TestClient(create_app(settings, flow)) as client:
+        client.headers["X-User"] = urllib.parse.quote("小明")
+        models = client.get("/api/models").json()
+        assert models["models"][0]["sizes"] == ["1K"] and models["max_count"] == 2
+        ok = {"model": "gemini-3.1-flash-image", "prompt": "x"}
+        assert client.post("/api/jobs", json={**ok, "size": "2K"}).status_code == 400
+        assert client.post("/api/jobs", json={**ok, "count": 3}).status_code == 400
+        assert client.post("/api/jobs", json={**ok, "count": 2}).status_code == 200

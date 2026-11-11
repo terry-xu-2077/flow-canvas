@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { assetUrl, downloadUrl } from './api'
 import { useCanvas } from './CanvasContext'
-import { IMAGE_WIDTH, type GenNodeType, type ImageNodeType } from './types'
+import { type GenNodeType, type ImageNodeType } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
 
@@ -59,6 +59,8 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   }
 
   return (
+    <>
+    <NodeResizer minWidth={300} minHeight={220} isVisible={selected} lineClassName="rz-line" handleClassName="rz-handle" />
     <div className={`card gen${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
@@ -66,7 +68,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         <button className="icon nodrag" title="删除卡片" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
       </div>
       <textarea
-        className="nodrag nowheel" rows={4} placeholder="描述你想生成的画面…（Ctrl+Enter 生成）"
+        className="nodrag nowheel" placeholder="描述你想生成的画面…（Ctrl+Enter 生成）"
         value={data.prompt} onChange={e => patch({ prompt: e.target.value })}
         onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canRun) canvas.generate(id) }}
       />
@@ -98,8 +100,11 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
           </div>
           <div className="pop-label">分辨率</div>
           <Segmented options={model?.sizes ?? []} value={data.size} onChange={v => patch({ size: v })} />
-          <div className="pop-label">一次生成</div>
-          <Segmented options={[1, 2, 3, 4]} value={data.count} onChange={v => patch({ count: v })} label={n => `${n} 张`} />
+          {canvas.maxCount > 1 && (<>
+            <div className="pop-label">一次生成</div>
+            <Segmented options={Array.from({ length: canvas.maxCount }, (_, i) => i + 1)} value={data.count}
+                       onChange={v => patch({ count: v })} label={n => `${n} 张`} />
+          </>)}
         </div>
       )}
       {visibleJobs.length > 0 && (
@@ -113,19 +118,21 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
       )}
       <Handle type="source" position={Position.Right} />
     </div>
+    </>
   )
 }
 
 export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   const canvas = useCanvas()
   const { deleteElements } = useReactFlow()
-  const height = Math.round((IMAGE_WIDTH * data.h) / data.w)
   return (
-    <div className={`card image${selected ? ' selected' : ''}`} style={{ width: IMAGE_WIDTH }}>
+    <>
+    <NodeResizer minWidth={120} keepAspectRatio isVisible={selected} lineClassName="rz-line" handleClassName="rz-handle" />
+    <div className={`card image${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <img
-        className="nodrag-img" draggable={false} src={assetUrl(data.assetId, 640)}
-        width={IMAGE_WIDTH} height={height} alt="" onDoubleClick={() => canvas.preview(data.assetId)}
+        className="nodrag-img" draggable={false} src={assetUrl(data.assetId, 1280)}
+        alt="" onDoubleClick={() => canvas.preview(data.assetId)}
       />
       <div className="img-meta">{data.w} × {data.h}</div>
       <div className="img-bar nodrag">
@@ -136,6 +143,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
       </div>
       <Handle type="source" position={Position.Right} />
     </div>
+    </>
   )
 }
 

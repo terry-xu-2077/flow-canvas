@@ -53,7 +53,7 @@ textarea { width: 100%; resize: vertical; line-height: 1.45; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px #0006; }
 .card.selected { border-color: var(--accent); }
-.card.gen { width: 340px; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.card.gen { width: 100%; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 13px; }
 .row { display: flex; gap: 6px; }
 .row select { flex: 1; }
@@ -120,3 +120,11 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .img-bar button, .img-bar a { background: #1b2027cc; backdrop-filter: blur(4px); }
 
 .dock button { white-space: nowrap; display: inline-flex; align-items: center; }
+
+/* ---- resizable nodes */
+.card.gen { height: 100%; min-height: 0; }
+.card.gen textarea { flex: 1; min-height: 56px; resize: none; }
+.card.image { width: 100%; height: 100%; }
+.card.image img { width: 100%; height: 100%; object-fit: contain; }
+.react-flow__resize-control.line { border-color: var(--accent); border-width: 1px; opacity: .55; }
+.react-flow__resize-control.handle { width: 10px; height: 10px; background: var(--accent); border: 1px solid #10140a; border-radius: 3px; }

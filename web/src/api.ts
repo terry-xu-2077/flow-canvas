@@ -29,7 +29,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 export const api = {
-  models: () => call<{ models: ModelInfo[] }>('/api/models').then(r => r.models),
+  models: () => call<{ models: ModelInfo[]; max_count: number }>('/api/models'),
   boards: () => call<{ boards: BoardMeta[] }>('/api/boards').then(r => r.boards),
   createBoard: (name: string) => call<BoardMeta>('/api/boards', json('POST', { name })),
   getBoard: (id: string) => call<{ id: string; name: string; data: any }>(`/api/boards/${id}`),

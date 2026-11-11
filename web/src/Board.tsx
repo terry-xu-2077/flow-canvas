@@ -9,7 +9,7 @@ import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } fro
 import { CanvasContext } from './CanvasContext'
 import { nodeTypes } from './nodes'
 import {
-  GEN_WIDTH, IMAGE_WIDTH, type CanvasActions, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
+  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, type CanvasActions, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
 } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -18,8 +18,12 @@ const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
 
 function nodeBox(n: CanvasNode) {
-  if (n.type === 'image') return { w: IMAGE_WIDTH, h: imgHeight(n.data.w, n.data.h) + 40 }
-  return { w: GEN_WIDTH, h: n.measured?.height ?? GEN_EST_HEIGHT }
+  const w = n.width ?? n.measured?.width
+  if (n.type === 'image') {
+    const width = w ?? IMAGE_WIDTH
+    return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
+  }
+  return { w: w ?? GEN_WIDTH, h: n.height ?? n.measured?.height ?? GEN_EST_HEIGHT }
 }
 
 /** Nudge a box down/right until it no longer overlaps an existing node. */
@@ -41,7 +45,7 @@ const edgeBase: Partial<Edge> = { style: { strokeWidth: 2 } }
 
 function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
   return {
-    nodes: nodes.map(n => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
+    nodes: nodes.map(n => ({ id: n.id, type: n.type, position: n.position, width: n.width, height: n.height, data: n.data })),
     edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, className: e.className })),
     viewport,
   }
@@ -52,6 +56,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [maxCount, setMaxCount] = useState(4)
   const [modelError, setModelError] = useState('')
   const [name, setName] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -70,7 +75,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   // ---- load board + models
   const loadModels = useCallback(() => {
-    api.models().then(m => { setModels(m); setModelError('') }).catch(e => setModelError(String(e.message || e)))
+    api.models().then(r => { setModels(r.models); setMaxCount(r.max_count); setModelError('') })
+      .catch(e => setModelError(String(e.message || e)))
   }, [])
   useEffect(() => { loadModels() }, [loadModels])
   useEffect(() => {
@@ -78,7 +84,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     api.getBoard(boardId).then(b => {
       if (dead) return
       const d = b.data || {}
-      const loadedNodes = (d.nodes || []) as CanvasNode[]
+      // Boards saved before nodes were resizable have no stored size: give them the default one.
+      const loadedNodes = ((d.nodes || []) as CanvasNode[]).map(n => {
+        const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : GEN_WIDTH)
+        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : GEN_HEIGHT)
+        return { ...n, width, height } as CanvasNode
+      })
       const loadedEdges = (d.edges || []) as Edge[]
       setName(b.name)
       setNodes(loadedNodes)
@@ -114,6 +125,26 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     return () => window.removeEventListener('pagehide', flush)
   }, [saveNow])
 
+  // Settings the admin switched off in config.json (model / resolution / count) are replaced by valid ones.
+  useEffect(() => {
+    if (!loaded || !models.length) return
+    setNodes(ns => {
+      let changed = false
+      const next = ns.map(n => {
+        if (n.type !== 'gen') return n
+        const d = (n as GenNodeType).data
+        const m = models.find(x => x.key === d.model) ?? models[0]
+        const ratio = m.ratios.includes(d.ratio) ? d.ratio : (m.ratios.includes('16:9') ? '16:9' : m.ratios[0])
+        const size = m.sizes.includes(d.size) ? d.size : m.sizes[0]
+        const count = Math.min(Math.max(1, d.count || 1), maxCount)
+        if (m.key === d.model && ratio === d.ratio && size === d.size && count === d.count) return n
+        changed = true
+        return { ...n, data: { ...d, model: m.key, ratio, size, count } } as CanvasNode
+      })
+      return changed ? next : ns
+    })
+  }, [loaded, models, maxCount, setNodes])
+
   // ---- node helpers
   const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
     setNodes(ns => ns.map(n => (n.id === id ? ({ ...n, data: { ...n.data, ...patch } } as CanvasNode) : n)))
@@ -122,7 +153,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const newGenNode = useCallback((x: number, y: number, prompt = ''): GenNodeType => {
     const m = models[0]
     return {
-      id: uid('g'), type: 'gen', position: { x, y }, width: GEN_WIDTH,
+      id: uid('g'), type: 'gen', position: { x, y }, width: GEN_WIDTH, height: GEN_HEIGHT,
       data: {
         prompt, model: m?.key ?? '', ratio: m?.ratios.includes('16:9') ? '16:9' : (m?.ratios[0] ?? '16:9'),
         size: m?.sizes[0] ?? '1K', count: 1, jobs: [], handled: [],
@@ -131,7 +162,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [models])
 
   const newImageNode = (assetId: string, w: number, h: number, x: number, y: number, prompt?: string): ImageNodeType => ({
-    id: uid('i'), type: 'image', position: { x, y }, width: IMAGE_WIDTH, data: { assetId, w, h, prompt },
+    id: uid('i'), type: 'image', position: { x, y }, width: IMAGE_WIDTH, height: imgHeight(w, h), data: { assetId, w, h, prompt },
   })
 
   const addGenCard = useCallback(() => {
@@ -262,7 +293,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           const spot = findFree([...next, ...added], gen.position.x + GEN_WIDTH + 110,
             gen.position.y + k * (imgHeight(w, h) + 70), IMAGE_WIDTH, imgHeight(w, h) + 40)
           added.push({
-            id: imgId, type: 'image', position: spot, width: IMAGE_WIDTH,
+            id: imgId, type: 'image', position: spot, width: IMAGE_WIDTH, height: imgHeight(w, h),
             data: { assetId: info.result_asset, w, h, prompt: gen.data.prompt },
           } as ImageNodeType)
           addedEdges.push({ ...edgeBase, id: `out_${info.id}`, source: gen.id, target: imgId, className: 'out' } as Edge)
@@ -312,8 +343,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [nodes, edges])
 
   const actions = useMemo<CanvasActions>(() => ({
-    models, patchNode, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount,
-  }), [models, patchNode, generate, cancelJobs, continueFrom, refCount])
+    models, maxCount, patchNode, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount,
+  }), [models, maxCount, patchNode, generate, cancelJobs, continueFrom, refCount])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
 
