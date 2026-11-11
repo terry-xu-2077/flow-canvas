@@ -97,7 +97,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .foot { display: flex; gap: 6px; align-items: center; }
 .foot .summary { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   background: var(--bg); font-size: 12.5px; }
-.pop { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 30; background: var(--panel);
+.pop { position: absolute; left: 0; width: 320px; top: calc(100% + 8px); z-index: 30; background: var(--panel);
   border: 1px solid #4a5463; border-radius: 14px; padding: 12px; box-shadow: 0 12px 30px #000a; display: flex; flex-direction: column; gap: 8px; }
 .pop-title { font-weight: 600; }
 .pop-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
