@@ -301,3 +301,28 @@ button, select, input { border-radius: var(--r-ctl); }
 .status-out { position: absolute; left: 0; right: 0; top: calc(100% + 8px); display: flex; flex-direction: column; align-items: center;
   gap: 4px; text-align: center; user-select: text; cursor: default; }
 .status-out .jobs { align-items: center; }
+
+/* ---- selection bar buttons look like the dock buttons (nothing lit or bold) */
+.selbar button.primary { background: #2c333d; border-color: transparent; color: var(--text); font-weight: 400; }
+.selbar button.primary:hover:not(:disabled) { background: #363e4a; border-color: transparent; }
+.selbar button.primary .ico { color: var(--accent); }
+.selbar button { border-color: transparent; background: transparent; }
+.selbar button:hover:not(:disabled) { background: #2c333d; }
+
+/* ---- empty image node while its job runs: a soft looping glow, status text below it */
+.card.image.pending { background: #141920; border-color: #ffffff10; overflow: hidden; }
+.card.image.pending .shimmer { position: absolute; inset: 0; }
+.card.image.pending .shimmer::before { content: ''; position: absolute; inset: -30%;
+  background: radial-gradient(circle at 30% 30%, #b6f23a40, transparent 52%), radial-gradient(circle at 72% 68%, #6ea8ff38, transparent 52%);
+  animation: glow 3.2s ease-in-out infinite; }
+.card.image.pending .shimmer::after { content: ''; position: absolute; top: 0; bottom: 0; left: -100%; right: -100%; will-change: transform;
+  background: linear-gradient(110deg, transparent 42%, #ffffff14 50%, transparent 58%); animation: sweep 2.4s linear infinite; }
+@keyframes glow { 0%, 100% { transform: translate(-6%, -4%) scale(1); opacity: .55; } 50% { transform: translate(7%, 5%) scale(1.12); opacity: 1; } }
+/* the band starts and ends fully outside the card, so the loop has no visible jump */
+@keyframes sweep { from { transform: translateX(-50%); } to { transform: translateX(50%); } }
+.card.image.pending.failed .shimmer::before, .card.image.pending.failed .shimmer::after { animation: none; opacity: 0; }
+.card.image.pending.failed { border-color: #ff7a7a55; }
+.status-out { color: var(--muted); font-size: 12px; }
+.status-out.err { color: var(--danger); }
+.status-out .hint.warn { color: #ffd37a; }
+.status-out .jobs .failed { color: var(--danger); }

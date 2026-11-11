@@ -309,9 +309,9 @@ def test_status_codes_are_formatted_by_this_app(env):
     client.app.state.runner._progress = spy
     job = wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"}).json()["jobs"][0])
     assert job["status"] == "done"
-    assert "排队中：您排在第 2 位（4 个任务正在生成）" in seen
-    assert "生成中 约 40%" in seen
-    assert "正在生成中…" in seen            # captcha detail is not shown
+    assert "排队中 第 2 位" in seen
+    assert "生成中 40%" in seen
+    assert "生成中" in seen                  # captcha detail is not shown
     assert not any("legacy" in t or "打码" in t for t in seen)
 
 

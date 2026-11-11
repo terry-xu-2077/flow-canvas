@@ -40,7 +40,8 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const running = data.jobs.some(j => !FINAL.has(j.status))
   const refs = canvas.refCount(id)
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
-  const visibleJobs = data.jobs.filter(j => !FINAL.has(j.status) || j.status === 'failed')
+  // progress lives under each result placeholder; only a submit that failed before any job existed is shown here
+  const visibleJobs = data.jobs.filter(j => j.id.startsWith('x') && j.status === 'failed')
   const canRun = !!data.prompt.trim() && !running && !!model
 
   useEffect(() => {
@@ -111,13 +112,11 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
       )}
       {(data.notice || visibleJobs.length > 0) && (
         <div className="status-out nodrag nowheel">
-          {data.notice && <div className="hint warn">⚠ {data.notice}</div>}
+          {data.notice && <div className="hint warn">{data.notice}</div>}
           {visibleJobs.length > 0 && (
             <ul className="jobs">
               {visibleJobs.map(j => (
-                <li key={j.id} className={j.status}>
-                  {j.status === 'failed' ? `❌ ${j.error || '失败'}` : `⏳ ${j.progress || (j.status === 'queued' ? '排队中…' : '生成中…')}`}
-                </li>
+                <li key={j.id} className={j.status}>{j.error || '失败'}</li>
               ))}
             </ul>
           )}
@@ -131,6 +130,21 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
 
 export function ImageNode({ data, selected }: NodeProps<ImageNodeType>) {
   const canvas = useCanvas()
+  if (data.pending) {
+    const failed = data.status === 'failed'
+    return (
+      <>
+        <div className={`card image pending${failed ? ' failed' : ''}${selected ? ' selected' : ''}`}>
+          <Handle type="target" position={Position.Left} />
+          <div className="shimmer" />
+          <Handle type="source" position={Position.Right} />
+        </div>
+        <div className={`status-out nodrag${failed ? ' err' : ''}`}>
+          {failed ? (data.error || '失败') : (data.progress || (data.status === 'queued' ? '排队中' : '生成中'))}
+        </div>
+      </>
+    )
+  }
   return (
     <>
     <NodeResizer minWidth={120} keepAspectRatio isVisible={selected} lineClassName="rz-line" handleClassName="rz-handle" />

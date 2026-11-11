@@ -26,6 +26,12 @@ export interface ImageData extends Record<string, unknown> {
   w: number
   h: number
   prompt?: string
+  // a placeholder while its job runs (the node is filled in place when the image is ready)
+  pending?: boolean
+  jobId?: string
+  status?: string
+  progress?: string
+  error?: string | null
 }
 
 export interface Slot { id: string; assetId?: string; w?: number; h?: number; name?: string }

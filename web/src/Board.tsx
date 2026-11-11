@@ -19,6 +19,10 @@ const FINAL = new Set(['done', 'failed', 'cancelled'])
 const GEN_EST_HEIGHT = 330
 const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
+const ratioSize = (ratio: string): [number, number] => {
+  const [w, h] = ratio.split(':').map(Number)
+  return w > 0 && h > 0 ? [w, h] : [1, 1]
+}
 
 function nodeBox(n: CanvasNode) {
   const w = n.width ?? n.measured?.width
@@ -87,7 +91,7 @@ function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo
   for (const e of edges.filter(e => e.target === genId)) {
     const src = nodes.find(n => n.id === e.source)
     const add = (r: RefInfo) => { if (!out.some(x => x.key === r.key)) out.push(r) }
-    if (src?.type === 'image') {
+    if (src?.type === 'image' && (src as ImageNodeType).data.assetId) {
       const d = (src as ImageNodeType).data
       add({ key: `n:${src.id}`, assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
     } else if (src?.type === 'refset') {
@@ -477,14 +481,30 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         board: boardId, node: genId, model: node.data.model, ratio: node.data.ratio, size: node.data.size,
         prompt, refs, count: node.data.count,
       })
-      patchNode(genId, {
-        jobs: ids.map<JobState>(id => ({ id, status: 'queued', progress: '' })),
-        notice: dropped ? `提示词里有 ${dropped} 处引用的参考图已不存在，提交时已忽略` : '',
+      const [rw, rh] = ratioSize(node.data.ratio)
+      const stacked = edgesRef.current.filter(e => e.source === genId && e.className === 'out').length
+      const placeholders: ImageNodeType[] = []
+      ids.forEach((jobId, i) => {
+        const spot = findFree([...nodesRef.current, ...placeholders], node.position.x + (node.width ?? GEN_WIDTH) + 110,
+          node.position.y + (stacked + i) * (imgHeight(rw, rh) + 90), IMAGE_WIDTH, imgHeight(rw, rh) + 40)
+        placeholders.push({
+          id: `img_${jobId}`, type: 'image', position: spot, width: IMAGE_WIDTH, height: imgHeight(rw, rh),
+          data: { assetId: '', w: rw, h: rh, prompt: node.data.prompt, pending: true, jobId, status: 'queued', progress: '' },
+        })
       })
+      setNodes(ns => [
+        ...ns.map(n => (n.id === genId ? ({ ...n, data: {
+          ...n.data, jobs: ids.map<JobState>(id => ({ id, status: 'queued', progress: '' })),
+          handled: [...(n as GenNodeType).data.handled, ...ids],
+          notice: dropped ? `提示词里有 ${dropped} 处引用的参考图已不存在，提交时已忽略` : '',
+        } } as CanvasNode) : n)),
+        ...placeholders,
+      ])
+      setEdges(es => [...es, ...placeholders.map(p => ({ ...edgeBase, id: `out_${p.data.jobId}`, source: genId, target: p.id, className: 'out' } as Edge))])
     } catch (e) {
       patchNode(genId, { jobs: [{ id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
     }
-  }, [boardId, patchNode])
+  }, [boardId, patchNode, setNodes, setEdges])
 
   const cancelJobs = useCallback((genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
@@ -496,6 +516,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     let next = nodesRef.current
     const added: CanvasNode[] = []
     const addedEdges: Edge[] = []
+    const removed = new Set<string>()
     for (const info of updates) {
       const idx = next.findIndex(n => n.id === info.node)
       if (idx < 0) continue
@@ -504,6 +525,21 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         ? { id: j.id, status: info.status, progress: info.progress, error: info.error } : j)
       let handled = gen.data.handled
       const imgId = `img_${info.id}`
+      if (next.some(n => n.id === imgId)) {
+        if (info.status === 'cancelled') {
+          removed.add(imgId)
+        } else {
+          next = next.map(n => {
+            if (n.id !== imgId) return n
+            const d = (n as ImageNodeType).data
+            if (info.status === 'done' && info.result_asset) {
+              const w = info.result_w || 1024, h = info.result_h || 1024
+              return { ...n, height: imgHeight(w, h), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
+            }
+            return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
+          })
+        }
+      }
       if (info.status === 'done' && info.result_asset && !handled.includes(info.id)) {
         handled = [...handled, info.id]
         if (![...next, ...added].some(n => n.id === imgId)) {
@@ -521,7 +557,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       }
       next = next.map((n, i) => (i === idx ? ({ ...n, data: { ...n.data, jobs, handled } } as CanvasNode) : n))
     }
+    if (removed.size) next = next.filter(n => !removed.has(n.id))
     setNodes(added.length ? [...next, ...added] : next)
+    if (removed.size) setEdges(es => es.filter(e => !removed.has(e.target)))
     if (updates.some(u => u.status === 'done')) window.dispatchEvent(new Event('fc-usage'))
     if (addedEdges.length) setEdges(es => [...es, ...addedEdges.filter(e => !es.some(x => x.id === e.id))])
   }, [setNodes, setEdges])
@@ -564,7 +602,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
   }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, refCount, refsOf])
 
-  const selectedImages = nodes.filter(n => n.selected && n.type === 'image')
+  const selectedImages = nodes.filter(n => n.selected && n.type === 'image' && !(n as ImageNodeType).data.pending)
   const viewport = useViewport()
   const selBar = (() => {
     if (!selectedImages.length) return null
@@ -639,7 +677,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                       ? <><BananaIcon className="ico-banana" /> 生成卡片 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
                       : n.type === 'refset'
                         ? <><CollectionIcon className="ico-collection" /> 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
-                        : <><ImageIcon className="ico-image" /> 图片 · {(n as ImageNodeType).data.w}×{(n as ImageNodeType).data.h}</>}
+                        : <><ImageIcon className="ico-image" /> {(n as ImageNodeType).data.pending ? '图片 · 生成中' : `图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}</>}
                   </li>
                 ))}
               </ul>
