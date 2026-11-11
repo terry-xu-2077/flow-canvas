@@ -55,6 +55,10 @@ class Store:
             return cur.rowcount
 
     # -- boards
+    def list_users(self) -> list[dict]:
+        return self._all(
+            "SELECT user, COUNT(*) AS boards, MAX(updated) AS updated FROM boards GROUP BY user ORDER BY updated DESC")
+
     def list_boards(self, user: str) -> list[dict]:
         return self._all(
             "SELECT id, name, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))

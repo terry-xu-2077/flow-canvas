@@ -360,3 +360,11 @@ button, select, input { border-radius: var(--r-ctl); }
   display: grid; place-items: center; background: #1b2027; border: 1px solid #8fa0b5; color: #dfe6ee; cursor: pointer; }
 .edge-x:hover { background: #2a313b; border-color: #c9d4e0; color: #fff; }
 .react-flow__edge.selected .react-flow__edge-path { stroke: #c9d4e0; }
+
+/* existing users on the login page */
+.user-list { margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; }
+.user-list small { color: #7d8896; }
+.user-list > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.user-chip { border-radius: 999px; padding: 6px 14px; background: #1b2027; border: 1px solid #2c343f; color: #dfe6ee; cursor: pointer; }
+.user-chip:hover { border-color: #8fa0b5; }
+.user-chip em { font-style: normal; color: #7d8896; margin-left: 8px; font-size: 12px; }

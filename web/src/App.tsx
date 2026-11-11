@@ -18,6 +18,8 @@ function useHashBoard(): [string | null, (id: string | null) => void] {
 function Login({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState('')
   const ok = /^[\w一-鿿\- ]{1,32}$/.test(name.trim())
+  const [users, setUsers] = useState<{ user: string; boards: number }[]>([])
+  useEffect(() => { api.users().then(setUsers).catch(() => {}) }, [])
   return (
     <div className="center-msg login">
       <h1><BrandMark size={30} /> Flow 画布</h1>
@@ -26,6 +28,18 @@ function Login({ onDone }: { onDone: () => void }) {
         <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="名字（1–32 个字符）" />
         <button className="primary" disabled={!ok}>进入</button>
       </form>
+      {users.length > 0 && (
+        <div className="user-list">
+          <small>已有用户，点击进入</small>
+          <div>
+            {users.map(u => (
+              <button key={u.user} className="user-chip" onClick={() => { setUser(u.user); onDone() }}>
+                {u.user}<em>{u.boards}</em>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

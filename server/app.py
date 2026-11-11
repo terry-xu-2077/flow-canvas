@@ -105,6 +105,11 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
                 "scope": "total"}
 
     # ---- boards
+    @app.get("/api/users")
+    async def list_users():
+        # names that already have boards, so the login page can offer them (LAN tool, names are not secret)
+        return {"users": store.list_users()}
+
     @app.get("/api/boards")
     async def list_boards(user: str = user_dep):
         return {"boards": store.list_boards(user)}

@@ -31,6 +31,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 export const api = {
   models: () => call<{ models: ModelInfo[]; max_count: number }>('/api/models'),
   usage: () => call<{ credits: number | null; image_daily: { name: string; used: number; limit: number }[]; date?: string }>('/api/usage'),
+  users: () => call<{ users: { user: string; boards: number; updated: number }[] }>('/api/users').then(r => r.users),
   boards: () => call<{ boards: BoardMeta[] }>('/api/boards').then(r => r.boards),
   createBoard: (name: string) => call<BoardMeta>('/api/boards', json('POST', { name })),
   getBoard: (id: string) => call<{ id: string; name: string; data: any }>(`/api/boards/${id}`),
