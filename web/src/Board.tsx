@@ -658,13 +658,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           )}
           <MiniMap pannable zoomable nodeStrokeWidth={2} />
           <Panel position="top-left" className="toolbar">
-            <BrandMark size={24} />
-            <button onClick={onBack} title="返回画板列表">←</button>
+            <button className="brand-btn" onClick={onBack} title="返回画板列表"><BrandMark size={32} /></button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
           </Panel>
-          <Panel position="top-right" className="toolbar who"><UsageBadge />{getUser()}</Panel>
+          <Panel position="top-right" className="toolbar who"><UsageBadge /><span className="user-pill">{getUser()}</span></Panel>
           {layersOpen && (
             <Panel position="top-right" className="layers">
               <div className="layers-head"><strong>图层</strong>

@@ -48,7 +48,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
     <div className="list">
       <header>
         <h1><BrandMark size={30} /> Flow 画布</h1>
-        <span className="who"><UsageBadge /> {getUser()} <button onClick={onLogout}>切换用户</button></span>
+        <span className="who"><UsageBadge /><span className="user-pill">{getUser()}</span><button onClick={onLogout}>切换用户</button></span>
       </header>
       {error && <div className="banner">{error}</div>}
       <div className="grid">
