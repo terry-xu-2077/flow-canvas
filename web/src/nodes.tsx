@@ -109,15 +109,19 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
           </>)}
         </div>
       )}
-      {data.notice && <div className="hint warn">⚠ {data.notice}</div>}
-      {visibleJobs.length > 0 && (
-        <ul className="jobs">
-          {visibleJobs.map(j => (
-            <li key={j.id} className={j.status}>
-              {j.status === 'failed' ? `❌ ${j.error || '失败'}` : `⏳ ${j.progress || (j.status === 'queued' ? '排队中…' : '生成中…')}`}
-            </li>
-          ))}
-        </ul>
+      {(data.notice || visibleJobs.length > 0) && (
+        <div className="status-out nodrag nowheel">
+          {data.notice && <div className="hint warn">⚠ {data.notice}</div>}
+          {visibleJobs.length > 0 && (
+            <ul className="jobs">
+              {visibleJobs.map(j => (
+                <li key={j.id} className={j.status}>
+                  {j.status === 'failed' ? `❌ ${j.error || '失败'}` : `⏳ ${j.progress || (j.status === 'queued' ? '排队中…' : '生成中…')}`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
       <Handle type="source" position={Position.Right} />
     </div>

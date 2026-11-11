@@ -296,3 +296,8 @@ button, select, input { border-radius: var(--r-ctl); }
 /* ---- board list header: everything on the right shares one centre line */
 .list header .who { display: flex; align-items: center; gap: 10px; }
 .list header .who .usage { margin-right: 0; }
+
+/* ---- job progress / notices sit under the card, centred, not inside it */
+.status-out { position: absolute; left: 0; right: 0; top: calc(100% + 8px); display: flex; flex-direction: column; align-items: center;
+  gap: 4px; text-align: center; user-select: text; cursor: default; }
+.status-out .jobs { align-items: center; }
