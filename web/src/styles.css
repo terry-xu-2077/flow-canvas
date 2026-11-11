@@ -374,3 +374,6 @@ button, select, input { border-radius: var(--r-ctl); }
   background: #171c22; border: 1px solid #2c343f; box-shadow: 0 20px 50px #000a; }
 .modal input { width: 100%; box-sizing: border-box; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* download button at the bottom-right of a board tile */
+.tile .tile-dl { top: auto; bottom: 8px; right: 8px; }

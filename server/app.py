@@ -1,15 +1,18 @@
 """FastAPI app: boards, assets, jobs, models; also serves the built web UI."""
 from __future__ import annotations
 
+import io
 import re
 import uuid
+import zipfile
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -125,6 +128,77 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         if not board:
             raise HTTPException(404, "画板不存在")
         return board
+
+    @app.post("/api/boards/import")
+    async def import_board(request: Request, name: str = "", user: str = user_dep):
+        """Create a board from a zip of images (the inverse of the zip download); images are laid out in a grid."""
+        raw = await request.body()
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(raw))
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "不是有效的 zip 文件")
+        exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+        entries = sorted((i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(exts)),
+                         key=lambda i: i.filename)
+        if not entries:
+            raise HTTPException(400, "zip 里没有图片")
+        if len(entries) > 300:
+            raise HTTPException(400, "zip 里的图片太多（最多 300 张）")
+        nodes, seen = [], set()
+        cols, cell_w = 4, 300
+        for i in entries:
+            if i.file_size > settings.max_upload_bytes:
+                continue
+            try:
+                info = save_image_bytes(settings, store, zf.read(i))
+            except AssetError:
+                continue
+            if info["id"] in seen:
+                continue
+            seen.add(info["id"])
+            k = len(nodes)
+            w = 260
+            h = max(60, round(w * info["h"] / max(1, info["w"])))
+            nodes.append({"id": f"img_{uuid.uuid4().hex[:8]}", "type": "image",
+                          "position": {"x": (k % cols) * cell_w, "y": (k // cols) * 340},
+                          "width": w, "height": h, "data": {"assetId": info["id"], "w": info["w"], "h": info["h"]}})
+        if not nodes:
+            raise HTTPException(400, "zip 里没有可用的图片")
+        title = (name or "导入的画板").strip()[:60] or "导入的画板"
+        board = store.create_board(user, uuid.uuid4().hex[:12], title)
+        store.save_board(user, board["id"], {"nodes": nodes, "edges": [], "viewport": {"x": 40, "y": 40, "zoom": 0.6}}, title)
+        return {**board, "images": len(nodes)}
+
+    @app.get("/api/boards/{board_id}/zip")
+    async def board_zip(board_id: str, user: str = user_dep):
+        """All images of a board (generated, uploaded and in collections) as one zip, in canvas order."""
+        board = store.get_board(user, board_id)
+        if not board:
+            raise HTTPException(404, "画板不存在")
+        ids: list[str] = []
+        for n in (board["data"].get("nodes") or []):
+            d = n.get("data") or {}
+            found = [d.get("assetId")] if n.get("type") == "image" else (
+                [s.get("assetId") for s in d.get("slots", [])] if n.get("type") == "refset" else [])
+            for a in found:
+                if a and a not in ids:
+                    ids.append(a)
+        buf = io.BytesIO()
+        count = 0
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # images are already compressed
+            for a in ids:
+                meta = store.get_asset(a) if re.fullmatch(r"[0-9a-f]{40}", a) else None
+                path = asset_path(settings, a) if meta else None
+                if not meta or not path or not path.exists():
+                    continue
+                ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}.get(meta["mime"], "img")
+                count += 1
+                zf.write(path, f"{count:03d}_{a[:8]}.{ext}")
+        if not count:
+            raise HTTPException(404, "这个画板里还没有图片")
+        fname = quote(re.sub(r'[\\/:*?"<>|]', "_", board["name"] or "board") + ".zip")
+        return Response(buf.getvalue(), media_type="application/zip",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"})
 
     @app.put("/api/boards/{board_id}")
     async def save_board(board_id: str, body: BoardBody, user: str = user_dep):

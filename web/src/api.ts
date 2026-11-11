@@ -37,6 +37,23 @@ export const api = {
   getBoard: (id: string) => call<{ id: string; name: string; data: any }>(`/api/boards/${id}`),
   saveBoard: (id: string, data: unknown) => call<{ ok: boolean }>(`/api/boards/${id}`, json('PUT', { data })),
   renameBoard: (id: string, name: string) => call<{ ok: boolean }>(`/api/boards/${id}`, json('PUT', { name })),
+  /** Download every image of a board as a zip (fetched with the user header, then saved through a temporary link). */
+  downloadBoardZip: async (id: string, name: string) => {
+    const res = await fetch(`/api/boards/${id}/zip`, { headers: { 'X-User': encodeURIComponent(getUser()) } })
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`
+      try { msg = (await res.json()).error || msg } catch { /* ignore */ }
+      throw new Error(String(msg))
+    }
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = url; a.download = `${name || 'board'}.zip`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+  },
+  importBoardZip: (file: File) => call<BoardMeta & { images: number }>(
+    `/api/boards/import?name=${encodeURIComponent(file.name.replace(/\.zip$/i, ''))}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file }),
   deleteBoard: (id: string) => call<{ ok: boolean }>(`/api/boards/${id}`, { method: 'DELETE' }),
   uploadAsset: (file: Blob) => call<AssetInfo>('/api/assets', { method: 'POST', body: file }),
   createJobs: (req: {

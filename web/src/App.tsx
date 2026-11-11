@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, clearUser, getUser, setUser, type BoardMeta } from './api'
 import Board from './Board'
 import { BrandMark } from './icons'
@@ -52,6 +52,8 @@ function Login({ onDone }: { onDone: () => void }) {
 function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogout: () => void }) {
   const [boards, setBoards] = useState<BoardMeta[] | null>(null)
   const [error, setError] = useState('')
+  const [importing, setImporting] = useState(false)
+  const zipInput = useRef<HTMLInputElement>(null)
   const refresh = useCallback(() => {
     api.boards().then(setBoards).catch(e => setError(String(e.message || e)))
   }, [])
@@ -72,10 +74,27 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
       {error && <div className="banner">{error}</div>}
       <div className="grid">
         <button className="tile new" onClick={create}>＋ 新建画板</button>
+        <button className="tile new" disabled={importing} onClick={() => zipInput.current?.click()}>
+          {importing ? '导入中…' : '⤒ 导入 zip'}
+        </button>
+        <input ref={zipInput} type="file" accept=".zip,application/zip" hidden onChange={async e => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          setImporting(true)
+          try { const b = await api.importBoardZip(file); onOpen(b.id) } catch (err) { alert(`导入失败：${(err as Error).message}`) } finally { setImporting(false) }
+        }} />
         {boards?.map(b => (
           <div key={b.id} className="tile" onClick={() => onOpen(b.id)}>
             <strong>{b.name}</strong>
             <small>{new Date(b.updated * 1000).toLocaleString()}</small>
+            <button className="icon tile-dl" title="下载画板里的全部图片（zip）" onClick={async e => {
+              e.stopPropagation()
+              try { await api.downloadBoardZip(b.id, b.name) } catch (err) { alert(`下载失败：${(err as Error).message}`) }
+            }}>
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2v8M4.8 7.2L8 10.4l3.2-3.2M2.5 13.5h11" /></svg>
+            </button>
             <button className="icon" title="删除画板" onClick={async e => {
               e.stopPropagation()
               if (confirm(`删除画板「${b.name}」？此操作无法恢复。`)) { await api.deleteBoard(b.id); refresh() }
