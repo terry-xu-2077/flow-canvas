@@ -75,6 +75,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
       <div className="grid">
         <div className="tile new split">
           <button className="split-main" onClick={create}>＋ 新建画板</button>
+          <span className="split-sep" aria-hidden>|</span>
           <button className="split-side" disabled={importing} title="从 zip 导入图片，新建一个画板" onClick={() => zipInput.current?.click()}>
             {importing ? '导入中…' : '⤒ 导入 zip'}
           </button>
