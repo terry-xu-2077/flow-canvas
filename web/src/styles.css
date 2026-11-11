@@ -385,3 +385,6 @@ button, select, input { border-radius: var(--r-ctl); }
 .tile.new.split .split-side { justify-self: start; }
 .tile.new.split .split-sep { color: #4a5563; }
 .tile.new.split button:hover { color: #dfe6ee; }
+.tile.new.split { padding: 0 6px; }
+.tile.new.split button { padding: 8px 9px; white-space: nowrap; font-size: 14px; }
+.tile.new.split .split-sep { white-space: nowrap; }
