@@ -22,6 +22,7 @@ import httpx
 import uvicorn
 
 from .app import create_app
+from . import cleanup
 from .config import ROOT, Settings, load_settings
 
 BG, CARD, EDGE = "#242424", "#2d2d2d", "#3a3a3a"
@@ -149,7 +150,7 @@ class Console:
         top = ctk.CTkFrame(r, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 8))
         ctk.CTkLabel(top, text="Terry Flow", font=("Microsoft YaHei UI", 20, "bold"), text_color=TEXT).pack(side="left")
-        for text, cmd in (("清空日志", self.clear_log), ("重启服务", self.restart), ("打开网页", self.open_web)):
+        for text, cmd in (("清理图片", self.clean_assets), ("清空日志", self.clear_log), ("重启服务", self.restart), ("打开网页", self.open_web)):
             ctk.CTkButton(top, text=text, width=84, height=30, fg_color=CARD, hover_color=EDGE, border_width=1, border_color=EDGE,
                           text_color=TEXT, command=cmd).pack(side="right", padx=(8, 0))
 
@@ -229,6 +230,31 @@ class Console:
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
+
+    def clean_assets(self) -> None:
+        dlg = ctk.CTkInputDialog(text="清理多少天前、没有被任何画板、头像或进行中任务使用的图片？
+（单位：天，最短 1 天）", title="清理未使用的图片")
+        raw = (dlg.get_input() or "").strip()
+        if not raw:
+            return
+        try:
+            days = max(1.0, float(raw))
+        except ValueError:
+            messagebox.showerror("清理", "请输入数字（天数）")
+            return
+        res = cleanup.scan(self.settings, days)
+        mb = res.bytes / 1048576
+        if not res.ids:
+            messagebox.showinfo("清理", f"没有可清理的图片。
+图片共 {res.total_files} 张，其中 {res.kept_young} 张未被使用但不足 {days:g} 天。")
+            return
+        if not messagebox.askyesno("清理", f"找到 {len(res.ids)} 张未使用的图片（共 {mb:.1f} MB），都已超过 {days:g} 天。
+"
+                                         f"删除后无法恢复，确定删除吗？"):
+            return
+        n, freed = cleanup.delete(self.settings, res.ids)
+        logging.getLogger("uvicorn.error").info("清理未使用图片：删除 %d 张，释放 %.1f MB", n, freed / 1048576)
+        messagebox.showinfo("清理", f"已删除 {n} 张，释放 {freed / 1048576:.1f} MB。")
 
     def restart(self) -> None:
         if not messagebox.askyesno("重启服务", "重启会中断正在进行的请求，确定吗？"):

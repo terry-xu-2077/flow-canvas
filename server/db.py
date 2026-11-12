@@ -135,7 +135,8 @@ class Store:
 
     # -- assets
     def put_asset(self, asset_id: str, mime: str, w: int, h: int, size: int) -> None:
-        self._run("INSERT OR IGNORE INTO assets (id,mime,w,h,size,created) VALUES (?,?,?,?,?,?)",
+        self._run("INSERT INTO assets (id,mime,w,h,size,created) VALUES (?,?,?,?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET created=excluded.created",  # re-uploading counts as using it again
                   (asset_id, mime, w, h, size, time.time()))
 
     def get_asset(self, asset_id: str) -> Optional[dict]:
