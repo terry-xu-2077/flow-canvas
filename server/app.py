@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .assets import AssetError, asset_path, save_image_bytes, thumbnail_path
-from .config import SIZE_ORDER, ROOT, Settings, load_settings
+from .config import SIZE_ORDER, SIZE_TARGET, ROOT, Settings, load_settings
 from .db import Store
 from .flow import FlowClient, FlowError, model_id
 from .jobs import JobRunner
@@ -55,28 +55,30 @@ class BoardBody(BaseModel):
     data: Optional[dict] = None
 
 
-def resolve_size(settings: Settings, supported: list[str], size: str) -> Optional[tuple[str, Optional[int]]]:
-    """Where a resolution comes from: (size Flow generates, long edge to enlarge to with ComfyUI or None), or None if
-    this resolution is switched off / impossible for the model."""
+def resolve_size(settings: Settings, supported: list[str], size: str) -> Optional[tuple[str, Optional[int], str]]:
+    """Where a resolution comes from: (size Flow generates, long edge to enlarge to with ComfyUI or None, enlarge
+    engine), or None when this resolution is switched off / impossible for the model."""
     size = (size or "1K").upper()
     spec = settings.resolutions.get(size) or ({"route": "flow"} if size in supported else {"route": "off"})
     if size in settings.disabled_sizes or spec.get("route") == "off":
         return None
     if spec.get("route") == "comfy":
-        base = str(spec.get("base") or "2K").upper()
-        if not settings.comfy_url:
+        if not settings.comfy_url or not supported:
             return None
+        target = int(spec.get("target") or SIZE_TARGET.get(size, 4096))
+        base = str(spec.get("base") or "").upper()
         if base not in supported:
-            base = supported[0] if supported else ""
-        return (base, int(spec.get("target") or 4096)) if base else None
-    return (size, None) if size in supported else None
+            smaller = [z for z in ("1K", "2K") if z in supported and SIZE_TARGET[z] < target]  # never the costly native 4K
+            base = smaller[-1] if smaller else supported[0]
+        return base, target, str(spec.get("engine") or settings.comfy_engine)
+    return (size, None, "") if size in supported else None
 
 
 def upscale_info(settings: Settings) -> dict:
-    """What the "enlarge" button on the canvas does (the 4K entry when it is a ComfyUI one, else a 4096 px default)."""
+    """What the "enlarge" button on the canvas does: the 4K entry's engine when that is a ComfyUI one."""
     spec = settings.resolutions.get("4K") or {}
-    target = int(spec.get("target") or 4096) if spec.get("route") == "comfy" else 4096
-    return {"enabled": bool(settings.comfy_url), "label": f"{round(target / 1024)}K", "target": target}
+    engine = str(spec.get("engine") or settings.comfy_engine) if spec.get("route") == "comfy" else settings.comfy_engine
+    return {"enabled": bool(settings.comfy_url), "label": "4K", "target": SIZE_TARGET["4K"], "engine": engine}
 
 
 def allowed_catalog(settings: Settings, catalog: list[dict]) -> list[dict]:
@@ -371,7 +373,7 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         route = resolve_size(settings, fam["sizes"] if fam else ["1K"], body.size)
         if not route:
             raise HTTPException(400, f"{body.size} 分辨率已被管理员关闭或暂不可用")
-        flow_size, upscale_to = route
+        flow_size, upscale_to, engine = route
         try:
             mid = model_id(body.model, body.ratio, flow_size)
         except FlowError as exc:
@@ -381,7 +383,7 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
                 raise HTTPException(400, "参考图不存在，请重新添加")
         ids = runner.submit(user=user, board=body.board, node=body.node, model=mid,
                             prompt=body.prompt.strip(), refs=body.refs, count=body.count,
-                            extra={"upscale_to": upscale_to, "size": body.size.upper()} if upscale_to else None)
+                            extra={"upscale_to": upscale_to, "engine": engine, "size": body.size.upper()} if upscale_to else None)
         return {"jobs": ids}
 
     @app.post("/api/upscale")
@@ -392,7 +394,7 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         if not store.get_asset(body.asset):
             raise HTTPException(400, "图片不存在")
         ids = runner.submit(user=user, board=body.board, node=None, model="comfy:upscale", prompt="", refs=[body.asset],
-                            extra={"standalone": True, "upscale_to": info["target"]})
+                            extra={"standalone": True, "upscale_to": info["target"], "engine": info["engine"]})
         return {"jobs": ids, "label": info["label"]}
 
     @app.get("/api/jobs")

@@ -94,10 +94,11 @@ class JobRunner:
             if strict:
                 raise ComfyError(f"这张图已经有 {max(w, h)} 像素，不需要放大到 {target}")
             return data
-        engine = UPSCALERS.get(self.settings.comfy_engine)
+        name = job["extra"].get("engine") or self.settings.comfy_engine
+        engine = UPSCALERS.get(name)
         if not engine:
-            raise ComfyError(f"未知的放大方案：{self.settings.comfy_engine}")
-        cfg = self.settings.comfy_pid if self.settings.comfy_engine == "pid" else self.settings.comfy_seedvr2
+            raise ComfyError(f"未知的放大方案：{name}")
+        cfg = self.settings.comfy_pid if name == "pid" else self.settings.comfy_seedvr2
         client = self.comfy_client()
 
         async def on_progress(text: str) -> None:

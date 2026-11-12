@@ -233,99 +233,161 @@ class Console:
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
 
-    # ---- settings (ComfyUI address, enlarge method, where each resolution comes from)
-    ROUTES = {"Flow 原生": "flow", "ComfyUI 放大": "comfy", "关闭": "off"}
+    # ---- settings window: where each resolution comes from, ComfyUI models, and the main config.json options
+    ROUTES = {"Flow 原生": ("flow", ""), "SeedVR2（ComfyUI 放大）": ("comfy", "seedvr2"), "PiD（ComfyUI 放大）": ("comfy", "pid"),
+              "关闭": ("off", "")}
+    NEED_RESTART = ("flow_base_url", "flow_api_key", "port", "max_parallel_jobs")
 
     def open_settings(self) -> None:
+        import json
         win = ctk.CTkToplevel(self.root, fg_color=BG)
         win.title("服务器设置")
-        win.geometry("640x640")
+        win.geometry("700x640")
         win.transient(self.root)
         win.after(150, win.focus)
         cfg_path = ROOT / "config.json"
-        import json
         raw = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         cf = raw.get("comfyui") or {}
         s = self.settings
-        label = lambda parent, text, **kw: ctk.CTkLabel(parent, text=text, text_color=kw.pop("color", TEXT),
-                                                        font=("Microsoft YaHei UI", kw.pop("size", 13)), **kw)
-        box = ctk.CTkFrame(win, fg_color=CARD, corner_radius=10, border_width=1, border_color=EDGE)
-        box.pack(fill="x", padx=16, pady=(16, 8))
-        label(box, "ComfyUI（放大与以后的编辑、生图、视频、文本增强）", size=14).grid(row=0, column=0, columnspan=3, sticky="w", padx=14, pady=(12, 6))
-        label(box, "地址").grid(row=1, column=0, sticky="w", padx=14, pady=6)
-        url = ctk.CTkEntry(box, width=300, placeholder_text="http://127.0.0.1:8188（留空 = 不启用）")
-        url.insert(0, s.comfy_url)
-        url.grid(row=1, column=1, sticky="w", pady=6)
-        status = label(box, "", color=DIM, size=12)
-        status.grid(row=2, column=1, columnspan=2, sticky="w", pady=(0, 4))
+        font = ("Microsoft YaHei UI", 13)
+
+        def label(parent, text, color=TEXT, size=13):
+            return ctk.CTkLabel(parent, text=text, text_color=color, font=("Microsoft YaHei UI", size))
+
+        def entry(parent, value, width=300, show=None):
+            e = ctk.CTkEntry(parent, width=width, show=show)
+            e.insert(0, str(value))
+            return e
+
+        bar = ctk.CTkFrame(win, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", padx=16, pady=14)
+        tabs = ctk.CTkTabview(win, fg_color=CARD, segmented_button_fg_color=EDGE, segmented_button_selected_color=ACCENT,
+                              segmented_button_selected_hover_color=ACCENT, segmented_button_unselected_color=EDGE,
+                              segmented_button_unselected_hover_color="#4a4a4a", text_color="#101418")
+        tabs.pack(fill="both", expand=True, padx=16, pady=(14, 0))
+        t1, t2, t3 = tabs.add("分辨率"), tabs.add("服务"), tabs.add("ComfyUI 模型")
+
+        # --- tab 1: ComfyUI address + one menu per resolution
+        label(t1, "ComfyUI 地址（放大与以后的编辑、生图、视频、文本增强）").grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 4))
+        url = entry(t1, s.comfy_url, 330)
+        url.configure(placeholder_text="http://127.0.0.1:8188（留空 = 不启用放大）")
+        url.grid(row=1, column=0, columnspan=2, sticky="w", padx=10)
+        status = label(t1, "", DIM, 12)
+        status.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(2, 10))
+        models: dict[str, list[str]] = {}
+
+        def fetch_models(target: str) -> None:
+            names = {"UNETLoader": "unet_name", "VAELoader": "vae_name", "CLIPLoader": "clip_name"}
+            out: dict[str, list[str]] = {}
+            try:
+                with httpx.Client(timeout=6) as c:
+                    r = c.get(target + "/system_stats")
+                    r.raise_for_status()
+                    ver = r.json().get("system", {}).get("comfyui_version", "?")
+                    for node, field in names.items():
+                        info = c.get(f"{target}/object_info/{node}").json()[node]["input"]["required"][field][0]
+                        out[field] = [v for v in info if isinstance(v, str)]
+                msg, col = f"连接成功（ComfyUI {ver}）", OK
+            except Exception as exc:
+                msg, col = f"连接失败：{type(exc).__name__}", BAD
+            models.update(out)
+
+            def done() -> None:
+                status.configure(text=msg, text_color=col)
+                for field, box in combos.values():
+                    if models.get(field):
+                        box.configure(values=models[field])
+            win.after(0, done)
 
         def test() -> None:
             status.configure(text="连接中…", text_color=DIM)
-            target = url.get().strip().rstrip("/")
+            threading.Thread(target=fetch_models, args=(url.get().strip().rstrip("/"),), daemon=True).start()
 
-            def work() -> None:
-                try:
-                    with httpx.Client(timeout=6) as c:
-                        r = c.get(target + "/system_stats")
-                        r.raise_for_status()
-                        v = r.json().get("system", {}).get("comfyui_version", "?")
-                    msg, col = f"连接成功（ComfyUI {v}）", OK
-                except Exception as exc:
-                    msg, col = f"连接失败：{type(exc).__name__}", BAD
-                win.after(0, lambda: status.configure(text=msg, text_color=col))
-
-            threading.Thread(target=work, daemon=True).start()
-
-        ctk.CTkButton(box, text="测试连接", width=84, height=28, fg_color=EDGE, hover_color="#4a4a4a", command=test).grid(row=1, column=2, padx=10)
-        label(box, "放大方案").grid(row=3, column=0, sticky="w", padx=14, pady=(6, 12))
-        names = {key: text for key, (text, _f) in UPSCALERS.items()}
-        engine = ctk.CTkOptionMenu(box, values=list(names.values()), width=300, fg_color=EDGE, button_color=EDGE)
-        engine.set(names.get(s.comfy_engine, names["seedvr2"]))
-        engine.grid(row=3, column=1, sticky="w", pady=(6, 12))
-
-        rbox = ctk.CTkFrame(win, fg_color=CARD, corner_radius=10, border_width=1, border_color=EDGE)
-        rbox.pack(fill="x", padx=16, pady=8)
-        label(rbox, "分辨率从哪里来", size=14).grid(row=0, column=0, columnspan=4, sticky="w", padx=14, pady=(12, 2))
-        label(rbox, "选“ComfyUI 放大”：先让 Flow 按“基础尺寸”出图，再放大到“目标长边”像素。", color=DIM, size=12).grid(
-            row=1, column=0, columnspan=4, sticky="w", padx=14, pady=(0, 6))
-        for j, head in enumerate(("分辨率", "来源", "基础尺寸", "目标长边（像素）")):
-            label(rbox, head, color=DIM, size=12).grid(row=2, column=j, sticky="w", padx=(14 if j == 0 else 4, 4))
-        rows = {}
+        ctk.CTkButton(t1, text="测试连接", width=84, height=28, fg_color=EDGE, hover_color="#4a4a4a", command=test).grid(row=1, column=2, padx=8)
+        label(t1, "每个分辨率由谁来出：", TEXT).grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=(4, 2))
+        label(t1, "选 SeedVR2 / PiD 时，服务器先让 Flow 出较小的一档，再放大到该分辨率；尺寸由服务器自动决定。", DIM, 12).grid(
+            row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 8))
         back = {v: k for k, v in self.ROUTES.items()}
+        route_boxes: dict[str, ctk.CTkOptionMenu] = {}
         for i, size in enumerate(SIZE_ORDER):
             spec = s.resolutions.get(size, {})
-            label(rbox, size).grid(row=3 + i, column=0, sticky="w", padx=14, pady=5)
-            route = ctk.CTkOptionMenu(rbox, values=list(self.ROUTES), width=130, fg_color=EDGE, button_color=EDGE)
-            route.set(back.get(spec.get("route", "flow"), "Flow 原生"))
-            route.grid(row=3 + i, column=1, sticky="w", padx=4)
-            base = ctk.CTkOptionMenu(rbox, values=["1K", "2K"], width=80, fg_color=EDGE, button_color=EDGE)
-            base.set(str(spec.get("base", "2K")))
-            base.grid(row=3 + i, column=2, sticky="w", padx=4)
-            target = ctk.CTkEntry(rbox, width=100)
-            target.insert(0, str(spec.get("target", {"4K": 4096, "6K": 6144}.get(size, ""))))
-            target.grid(row=3 + i, column=3, sticky="w", padx=4)
-            rows[size] = (route, base, target)
-        label(rbox, "", size=4).grid(row=8, column=0)
-        label(win, "模型文件名等高级项在 config.json 的 comfyui 里改。保存后立即生效，无需重启。", color=DIM, size=12).pack(anchor="w", padx=18, pady=(4, 0))
+            label(t1, size).grid(row=5 + i, column=0, sticky="w", padx=10, pady=6)
+            kind = (spec.get("route", "flow"), spec.get("engine", s.comfy_engine) if spec.get("route") == "comfy" else "")
+            box = ctk.CTkOptionMenu(t1, values=list(self.ROUTES), width=240, fg_color=EDGE, button_color=EDGE, font=font,
+                                    dropdown_font=font)
+            box.set(back.get(kind, "Flow 原生"))
+            box.grid(row=5 + i, column=1, sticky="w", pady=6)
+            route_boxes[size] = box
+
+        # --- tab 2: config.json options
+        rows2 = [("Flow 地址（重启生效）", "flow_base_url", s.flow_base_url, 340, None),
+                 ("Flow API Key（重启生效）", "flow_api_key", s.flow_api_key, 340, "*"),
+                 ("端口（重启生效）", "port", s.port, 100, None),
+                 ("同时转发给 Flow 的任务数（重启生效）", "max_parallel_jobs", s.max_parallel_jobs, 100, None),
+                 ("一张卡片一次最多生成（1–8 张）", "max_count", s.max_count, 100, None),
+                 ("任务超时（分钟）", "job_timeout", round(s.job_timeout / 60, 1), 100, None),
+                 ("上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100, None),
+                 ("关闭的模型（key，逗号分隔）", "disabled_models", ", ".join(s.disabled_models), 340, None)]
+        f2: dict[str, ctk.CTkEntry] = {}
+        for i, (text, key, val, width, show) in enumerate(rows2):
+            label(t2, text).grid(row=i, column=0, sticky="w", padx=10, pady=7)
+            f2[key] = entry(t2, val, width, show)
+            f2[key].grid(row=i, column=1, sticky="w", pady=7)
+        t2.grid_columnconfigure(0, minsize=260)
+
+        # --- tab 3: model files used by the enlarge workflows (choices come from ComfyUI once connected)
+        from .comfy_workflows import DEFAULT_PID, DEFAULT_SEEDVR2
+        combos: dict[str, tuple[str, ctk.CTkComboBox]] = {}
+        spec3 = [("SeedVR2", [("扩散模型", "seedvr2", "unet", "unet_name"), ("VAE", "seedvr2", "vae", "vae_name")]),
+                 ("PiD", [("扩散模型", "pid", "unet", "unet_name"), ("文本编码器", "pid", "clip", "clip_name"),
+                          ("VAE（图片编码）", "pid", "vae", "vae_name")])]
+        defaults = {"seedvr2": DEFAULT_SEEDVR2, "pid": DEFAULT_PID}
+        cur = {"seedvr2": {**DEFAULT_SEEDVR2, **s.comfy_seedvr2}, "pid": {**DEFAULT_PID, **s.comfy_pid}}
+        r = 0
+        for group, items in spec3:
+            label(t3, group, TEXT, 14).grid(row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 2))
+            r += 1
+            for text, eng, key, field in items:
+                label(t3, text).grid(row=r, column=0, sticky="w", padx=10, pady=5)
+                cb = ctk.CTkComboBox(t3, width=400, values=[cur[eng][key]], font=font, dropdown_font=font)
+                cb.set(cur[eng][key])
+                cb.grid(row=r, column=1, sticky="w", pady=5)
+                combos[f"{eng}.{key}"] = (field, cb)
+                r += 1
+        label(t3, "点“分辨率”页的“测试连接”后，下拉里会列出 ComfyUI 里现有的文件。", DIM, 12).grid(
+            row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 0))
+        if s.comfy_url:
+            threading.Thread(target=fetch_models, args=(s.comfy_url,), daemon=True).start()
 
         def save() -> None:
             res: dict = {}
-            for size, (route, base, target) in rows.items():
-                kind = self.ROUTES[route.get()]
-                spec: dict = {"route": kind}
-                if kind == "comfy":
-                    try:
-                        spec.update(base=base.get(), target=int(target.get()))
-                    except ValueError:
-                        messagebox.showerror("设置", f"{size} 的目标长边需要是数字", parent=win)
-                        return
-                res[size] = spec
+            for size, box in route_boxes.items():
+                kind, eng = self.ROUTES[box.get()]
+                res[size] = {"route": kind, **({"engine": eng} if eng else {})}
+            try:
+                vals = {
+                    "port": int(f2["port"].get()), "max_parallel_jobs": max(1, int(f2["max_parallel_jobs"].get())),
+                    "max_count": max(1, min(8, int(f2["max_count"].get()))),
+                    "job_timeout": max(60.0, float(f2["job_timeout"].get()) * 60),
+                    "max_upload_bytes": max(1, int(float(f2["max_upload_mb"].get()))) * 1048576,
+                }
+            except ValueError:
+                messagebox.showerror("设置", "端口、任务数、张数、超时、上传上限都需要是数字", parent=win)
+                return
+            before = {k: getattr(self.settings, k) for k in self.NEED_RESTART}
+            raw.update(flow_base_url=f2["flow_base_url"].get().strip(), flow_api_key=f2["flow_api_key"].get().strip(),
+                       port=vals["port"], max_parallel_jobs=vals["max_parallel_jobs"], max_count=vals["max_count"],
+                       job_timeout=vals["job_timeout"], max_upload_bytes=vals["max_upload_bytes"],
+                       disabled_models=[m.strip() for m in f2["disabled_models"].get().split(",") if m.strip()])
             comfy = dict(cf)
             comfy["url"] = url.get().strip().rstrip("/")
-            comfy["upscale_engine"] = next((k for k, t in names.items() if t == engine.get()), "seedvr2")
+            comfy.pop("upscale_engine", None)   # each resolution has its own engine now
+            for eng in ("seedvr2", "pid"):
+                comfy[eng] = {**(cf.get(eng) or {}), **{k.split(".")[1]: box.get().strip() for k, (_f, box) in combos.items()
+                                                        if k.startswith(eng + ".") and box.get().strip()}}
             raw["comfyui"] = comfy
             raw["resolutions"] = res
-            raw.pop("disabled_sizes", None)   # superseded by the "关闭" route
+            raw.pop("disabled_sizes", None)     # superseded by the "关闭" choice
             cfg_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
             new = load_settings()
             for f in dataclasses.fields(Settings):
@@ -333,9 +395,10 @@ class Console:
                     setattr(self.settings, f.name, getattr(new, f.name))
             logging.getLogger("uvicorn.error").info("服务器设置已保存")
             win.destroy()
+            if any(before[k] != getattr(new, k) for k in self.NEED_RESTART):
+                if messagebox.askyesno("设置", "有几项要重启服务才会生效，现在重启吗？"):
+                    self.restart(confirm=False)
 
-        bar = ctk.CTkFrame(win, fg_color="transparent")
-        bar.pack(side="bottom", fill="x", padx=16, pady=14)
         ctk.CTkButton(bar, text="保存", width=90, fg_color=ACCENT, text_color="#101418", hover_color="#9bbcff", command=save).pack(side="right")
         ctk.CTkButton(bar, text="取消", width=90, fg_color=CARD, hover_color=EDGE, border_width=1, border_color=EDGE, text_color=TEXT,
                       command=win.destroy).pack(side="right", padx=8)
@@ -362,8 +425,8 @@ class Console:
         logging.getLogger("uvicorn.error").info("清理未使用图片：删除 %d 张，释放 %.1f MB", n, freed / 1048576)
         messagebox.showinfo("清理", f"已删除 {n} 张，释放 {freed / 1048576:.1f} MB。")
 
-    def restart(self) -> None:
-        if not messagebox.askyesno("重启服务", "重启会中断正在进行的请求，确定吗？"):
+    def restart(self, confirm: bool = True) -> None:
+        if confirm and not messagebox.askyesno("重启服务", "重启会中断正在进行的请求，确定吗？"):
             return
         logging.getLogger("uvicorn.error").info("—— 重启服务 ——")
         self.root.config(cursor="watch")

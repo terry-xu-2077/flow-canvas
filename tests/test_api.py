@@ -241,7 +241,7 @@ def test_disabled_options_are_hidden_and_refused(tmp_path):
     flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
     with TestClient(create_app(settings, flow)) as client:
         client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
-        assert client.get("/api/models").json() == {"models": [], "max_count": 2, "upscale": {"enabled": False, "label": "4K", "target": 4096}}
+        assert client.get("/api/models").json() == {"models": [], "max_count": 2, "upscale": {"enabled": False, "label": "4K", "target": 4096, "engine": "seedvr2"}}
         r = client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"})
         assert r.status_code == 400 and "关闭" in r.json()["error"]
 

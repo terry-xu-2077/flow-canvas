@@ -11,14 +11,18 @@ ROOT = Path(__file__).resolve().parent.parent
 SIZE_ORDER = ("1K", "2K", "4K", "6K")
 
 
+# Long edge each resolution stands for (16:9; Flow's own 1K / 2K are 1376 / 2752 px wide).
+SIZE_TARGET = {"1K": 1376, "2K": 2752, "4K": 4096, "6K": 6144}
+
+
 def default_resolutions() -> dict:
-    # route: flow = generated at that size by Flow; comfy = generated at `base` by Flow, then enlarged by ComfyUI to
-    # a long edge of `target` pixels; off = hidden.
+    # route: flow = Flow makes it directly; comfy = Flow makes the largest smaller size, then ComfyUI enlarges it with
+    # `engine` (seedvr2 | pid); off = hidden. The base size and the target pixels are worked out by the server.
     return {
         "1K": {"route": "flow"},
         "2K": {"route": "flow"},
-        "4K": {"route": "comfy", "base": "2K", "target": 4096},
-        "6K": {"route": "comfy", "base": "2K", "target": 6144},
+        "4K": {"route": "comfy", "engine": "seedvr2"},
+        "6K": {"route": "comfy", "engine": "seedvr2"},
     }
 
 

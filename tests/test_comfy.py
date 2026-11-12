@@ -15,13 +15,13 @@ from test_api import BASE, FakeFlow
 
 def test_resolve_size_routes():
     s = Settings(comfy_url="http://c")
-    assert resolve_size(s, ["1K", "2K"], "2K") == ("2K", None)
-    assert resolve_size(s, ["1K", "2K"], "4K") == ("2K", 4096)
-    assert resolve_size(s, ["1K", "2K"], "6K") == ("2K", 6144)
-    assert resolve_size(s, ["1K"], "6K") == ("1K", 6144)          # base missing on the model: falls back to its smallest
-    assert resolve_size(Settings(), ["1K", "2K"], "4K") is None    # ComfyUI not configured
-    s.resolutions["2K"] = {"route": "comfy", "base": "1K", "target": 2752}
-    assert resolve_size(s, ["1K", "2K"], "2K") == ("1K", 2752)
+    assert resolve_size(s, ["1K", "2K"], "2K") == ("2K", None, "")
+    assert resolve_size(s, ["1K", "2K"], "4K") == ("2K", 4096, "seedvr2")
+    assert resolve_size(s, ["1K", "2K", "4K"], "6K") == ("2K", 6144, "seedvr2")   # native 4K is not a base for 6K
+    assert resolve_size(s, ["1K"], "6K") == ("1K", 6144, "seedvr2")
+    assert resolve_size(Settings(), ["1K", "2K"], "4K") is None                   # ComfyUI not configured
+    s.resolutions["2K"] = {"route": "comfy", "engine": "pid"}
+    assert resolve_size(s, ["1K", "2K"], "2K") == ("1K", 2752, "pid")
     s.disabled_sizes = ("4K",)
     assert resolve_size(s, ["1K", "2K"], "4K") is None
 
@@ -101,5 +101,5 @@ def test_models_offer_comfy_sizes_and_jobs_carry_the_upscale(tmp_path):
         client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
         m = client.get("/api/models").json()
         assert m["models"][0]["sizes"] == ["1K", "2K", "4K", "6K"]
-        assert m["upscale"] == {"enabled": True, "label": "4K", "target": 4096}
+        assert m["upscale"] == {"enabled": True, "label": "4K", "target": 4096, "engine": "seedvr2"}
         assert client.post("/api/upscale", json={"asset": "0" * 40}).status_code == 400   # unknown image
