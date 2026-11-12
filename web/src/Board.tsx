@@ -21,8 +21,8 @@ const FINAL = new Set(['done', 'failed', 'cancelled'])
 const GEN_EST_HEIGHT = 330
 const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
-// images made by a generation card are 50% larger than the default image size
-const RESULT_WIDTH = Math.round(IMAGE_WIDTH * 1.5)
+// images made by a generation card are larger than the default image size (about the size users resized them to)
+const RESULT_WIDTH = 540
 const resultHeight = (w: number, h: number) => Math.round((RESULT_WIDTH * h) / w)
 const ratioSize = (ratio: string): [number, number] => {
   const [w, h] = ratio.split(':').map(Number)
