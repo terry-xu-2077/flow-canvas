@@ -503,3 +503,5 @@ button, select, input { border-radius: var(--r-ctl); }
 /* login title: big mark and app name */
 .login h1 { font-size: 64px; line-height: 1; gap: 22px; margin: 0 0 18px; font-weight: 700; letter-spacing: -0.5px; }
 .login h1 .brand { width: 100px; height: 100px; }
+.login h1 { margin-bottom: 0; }
+.login .tagline { margin-top: 4px; }
