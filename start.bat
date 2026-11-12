@@ -27,6 +27,18 @@ if not exist "venv\Scripts\python.exe" (
     )
 )
 
+REM packages added by later versions: install whatever the existing venv is missing
+"venv\Scripts\python.exe" -c "import fastapi,uvicorn,httpx,PIL,customtkinter" >nul 2>&1
+if errorlevel 1 (
+    echo [setup] installing missing Python packages ...
+    "venv\Scripts\python.exe" -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo [error] pip install failed. Check the network, then run this again.
+        pause
+        exit /b 1
+    )
+)
+
 if not exist "config.json" (
     echo [setup] config.json not found, creating it from config.example.json
     copy /y config.example.json config.json >nul
