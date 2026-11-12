@@ -69,7 +69,9 @@ def resolve_size(settings: Settings, supported: list[str], size: str) -> Optiona
         target = int(spec.get("target") or SIZE_TARGET.get(size, 4096))
         base = str(spec.get("base") or "").upper()
         if base not in supported:
-            smaller = [z for z in ("1K", "2K") if z in supported and SIZE_TARGET[z] < target]  # never the costly native 4K
+            # only a size Flow itself makes (its 2K stage already enlarges once, so a 2K that ComfyUI takes over is no base) and never native 4K
+            smaller = [z for z in ("1K", "2K") if z in supported and SIZE_TARGET[z] < target
+                       and (settings.resolutions.get(z) or {"route": "flow"}).get("route", "flow") == "flow"]
             base = smaller[-1] if smaller else supported[0]
         return base, target, str(spec.get("engine") or settings.comfy_engine)
     return (size, None, "") if size in supported else None

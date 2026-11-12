@@ -22,6 +22,7 @@ def test_resolve_size_routes():
     assert resolve_size(Settings(), ["1K", "2K"], "4K") is None                   # ComfyUI not configured
     s.resolutions["2K"] = {"route": "comfy", "engine": "pid"}
     assert resolve_size(s, ["1K", "2K"], "2K") == ("1K", 2752, "pid")
+    assert resolve_size(s, ["1K", "2K"], "4K") == ("1K", 4096, "seedvr2")   # 2K is ComfyUI's now, so 4K starts from 1K
     s.disabled_sizes = ("4K",)
     assert resolve_size(s, ["1K", "2K"], "4K") is None
 
