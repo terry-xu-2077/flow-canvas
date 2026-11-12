@@ -7,7 +7,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
-import { copyAssetImage } from './clipboard'
+import { copyAssetImage, imageFromHtml, recallCopied, rememberCopied } from './clipboard'
 import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
 import { nodeTypes } from './nodes'
 import { edgeTypes } from './DeletableEdge'
@@ -449,16 +449,38 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const onPaste = (e: ClipboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return
-      const files = Array.from(e.clipboardData?.files ?? [])
-      if (!files.some(f => f.type.startsWith('image/'))) return
-      e.preventDefault()
+      const cd = e.clipboardData
+      const files = Array.from(cd?.files ?? [])
       const sets = nodesRef.current.filter(n => n.selected && n.type === 'refset')
-      if (sets.length === 1) void addToRefset(sets[0].id, files)
-      else placeImages(files)
+      const put = (list: File[]) => { if (sets.length === 1) void addToRefset(sets[0].id, list); else placeImages(list) }
+      if (files.some(f => f.type.startsWith('image/'))) { e.preventDefault(); put(files); return }
+      const html = cd?.getData('text/html') ?? ''
+      const text = cd?.getData('text/plain') ?? ''
+      if (html.includes('<img')) {
+        e.preventDefault()
+        void imageFromHtml(html).then(f => { if (f) put([f]) })
+        return
+      }
+      const copied = text.trim() ? [] : recallCopied()
+      if (!copied.length) return
+      // pictures copied inside the app: paste them without uploading anything
+      e.preventDefault()
+      if (sets.length === 1) {
+        editSlots(sets[0].id, ss => [...ss, ...copied.map(c => ({ id: uid('s'), assetId: c.id, w: c.w, h: c.h }))])
+      } else {
+        const base = rf.screenToFlowPosition({ x: window.innerWidth / 2 - 140, y: window.innerHeight / 2 - 100 })
+        const added: ImageNodeType[] = []
+        copied.forEach((c, i) => {
+          const spot = findFree([...nodesRef.current, ...added], base.x + i * 30, base.y, IMAGE_WIDTH, imgHeight(c.w, c.h) + 40)
+          added.push(newImageNode(c.id, c.w, c.h, spot.x, spot.y))
+        })
+        setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), ...added.map(n => ({ ...n, selected: true }))] as CanvasNode[])
+      }
+      showToast(`已粘贴 ${copied.length} 张图片`)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [placeImages, addToRefset])
+  }, [placeImages, addToRefset, editSlots, rf, setNodes, showToast])
 
   // Ctrl/Cmd+C on selected pictures copies the picture itself (as an image) to the system clipboard.
   useEffect(() => {
@@ -470,10 +492,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const imgs = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && !!n.selected && !n.data.pending && !!n.data.assetId)
       if (!imgs.length) return
       e.preventDefault()
-      const first = [...imgs].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)[0]
-      copyAssetImage(first.data.assetId)
-        .then(() => showToast(imgs.length > 1 ? `已复制 1 张图片（剪贴板一次只能放一张，复制的是最靠前的）` : '已复制图片到剪贴板'))
-        .catch(err => showToast(`复制失败：${(err as Error).message}`, true))
+      const sorted = [...imgs].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+      // all selected pictures can be pasted back into any board; the system clipboard takes the first one
+      rememberCopied(sorted.map(n => ({ id: n.data.assetId, w: n.data.w, h: n.data.h })))
+      copyAssetImage(sorted[0].data.assetId)
+        .then(() => showToast(imgs.length > 1 ? `已复制 ${imgs.length} 张图片（粘贴回画板是全部，粘贴到其他软件只有第一张）` : '已复制图片'))
+        .catch(() => showToast(imgs.length > 1 ? `已复制 ${imgs.length} 张图片，可粘贴回画板` : '已复制图片，可粘贴回画板（系统剪贴板不可用）'))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
