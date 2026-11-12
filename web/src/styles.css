@@ -514,3 +514,4 @@ button, select, input { border-radius: var(--r-ctl); }
 .login-head { gap: 12px; }
 .login .login-head .tagline { margin-bottom: 0; }
 .login .login-head { margin-bottom: 50px; }
+.login .tagline { font-size: 15.84px; }
