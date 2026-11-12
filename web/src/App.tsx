@@ -27,8 +27,10 @@ function Login({ onDone }: { onDone: () => void }) {
   const enter = (id: string) => { setUser(id); onDone() }
   return (
     <div className="center-msg login">
-      <h1><BrandMark size={30} /> Terry Flow</h1>
-      <p className="tagline">局域网多人共用的 Flow 图像生成画布：无限画布、参考图集合、一键出图</p>
+      <div className="login-head">
+        <h1><BrandMark size={30} /> Terry Flow</h1>
+        <p className="tagline">局域网多人共用 Flow 无限画布</p>
+      </div>
       <div className="user-pick">
         {users?.map(u => (
           <button key={u.id} className="user-chip" onClick={() => enter(u.id)}>

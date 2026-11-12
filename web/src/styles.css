@@ -507,3 +507,10 @@ button, select, input { border-radius: var(--r-ctl); }
 .login .tagline { margin-top: 4px; }
 .login .tagline { margin-bottom: 50px; } /* 16px + one user-chip height (34px) of extra space before the user list */
 .login .tagline { font-size: 14.4px; opacity: .7; }
+
+/* the tagline never grows wider than the title: it wraps instead */
+.login-head { display: flex; flex-direction: column; align-items: center; width: max-content; max-width: 100%; }
+.login-head .tagline { width: 0; min-width: 100%; text-align: center; }
+.login-head { gap: 12px; }
+.login .login-head .tagline { margin-bottom: 0; }
+.login .login-head { margin-bottom: 50px; }
