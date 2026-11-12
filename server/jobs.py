@@ -13,6 +13,7 @@ from PIL import Image
 from .assets import AssetError, asset_path, save_image_bytes
 from .comfy import ComfyClient, ComfyError
 from .comfy_workflows import UPSCALERS
+from .config import SIZE_ORDER, SIZE_TARGET
 from .config import Settings
 from .db import Store
 from .flow import FlowClient, FlowError, mentions_to_text
@@ -101,12 +102,15 @@ class JobRunner:
         cfg = self.settings.comfy_pid if name == "pid" else self.settings.comfy_seedvr2
         client = self.comfy_client()
 
-        async def on_progress(text: str) -> None:
-            await self._progress(job_id, text)
+        size = job["extra"].get("size") or next((z for z in SIZE_ORDER if SIZE_TARGET[z] == target), f"{target}px")
+        tag = f"放大到 {size}"
 
-        await self._progress(job_id, "等待放大…")
+        async def on_progress(text: str) -> None:
+            await self._progress(job_id, f"{tag} · {text}")
+
+        await self._progress(job_id, f"{tag} · 等待 ComfyUI…")
         async with self._comfy_sem:
-            await self._progress(job_id, "放大中…")
+            await self._progress(job_id, f"{tag} · 处理中…")
             name = await client.upload_image(data, f"terryflow_{job_id}.png")
             prompt, out = engine[1](name, w, h, target, cfg, job["prompt"] if not strict else "")
             return await client.run_image(prompt, out, on_progress, self.settings.comfy_timeout)

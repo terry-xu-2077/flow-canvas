@@ -406,7 +406,7 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         if not store.get_asset(body.asset):
             raise HTTPException(400, "图片不存在")
         ids = runner.submit(user=user, board=body.board, node=None, model="comfy:upscale", prompt="", refs=[body.asset],
-                            extra={"standalone": True, "upscale_to": opt["target"], "engine": opt["engine"]})
+                            extra={"standalone": True, "upscale_to": opt["target"], "engine": opt["engine"], "size": opt["size"]})
         return {"jobs": ids, "label": opt["size"]}
 
     @app.get("/api/jobs")

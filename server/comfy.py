@@ -105,13 +105,13 @@ class ComfyClient:
                     raise ComfyError(str(detail).strip()[:400])
                 if st.get("completed", True) or hist.get("outputs"):
                     return hist
-            text = "ComfyUI 处理中…"
+            text = "处理中…"
             q = await self._get("/queue", timeout=15)
             if q.status_code == 200:
                 body = q.json()
                 pending = [it[1] for it in body.get("queue_pending", []) if len(it) > 1]
                 if prompt_id in pending:
-                    text = f"ComfyUI 排队中（前面 {pending.index(prompt_id) + len(body.get('queue_running', []))} 个）…"
+                    text = f"排队中（前面 {pending.index(prompt_id) + len(body.get('queue_running', []))} 个）…"
             if on_progress and text != last:
                 last = text
                 await on_progress(text)
