@@ -150,13 +150,16 @@ export default function PromptEditor(props: {
     }
   }
 
-  const onInput = (e: React.FormEvent) => {
+  // Also runs while an IME is composing: a Chinese IME keeps the typed "@" in its composition buffer, so waiting
+  // for the composition to end would never show the menu for it.
+  const onInput = (e: React.SyntheticEvent) => {
     emit()
-    if ((e.nativeEvent as InputEvent).isComposing) return
+    // pinyin still being composed is not a search term: show every reference until the text is committed
+    const composing = e.type === 'compositionupdate' || (!!(e.nativeEvent as InputEvent).isComposing && e.type !== 'compositionend')
     const hit = caretHit()
     if (hit) {
       rangeRef.current = hit.range
-      setMenu(m => ({ q: hit.q, active: m?.chip ? 0 : Math.min(m?.active ?? 0, 99), chip: null, ...place(hit.range.getBoundingClientRect()) }))
+      setMenu(m => ({ q: composing ? '' : hit.q, active: m?.chip ? 0 : Math.min(m?.active ?? 0, 99), chip: null, ...place(hit.range.getBoundingClientRect()) }))
     } else if (menu && !menu.chip) setMenu(null)
   }
 
@@ -239,7 +242,7 @@ export default function PromptEditor(props: {
       <div
         ref={el} className="pe" contentEditable suppressContentEditableWarning spellCheck={false}
         data-placeholder="描述你想生成的画面…（@ 引用参考图，Ctrl+Enter 生成）"
-        onInput={onInput} onKeyDown={onKeyDown} onKeyUp={e => e.stopPropagation()} onPaste={onPaste} onCopy={onCopy}
+        onInput={onInput} onCompositionUpdate={onInput} onCompositionEnd={onInput} onKeyDown={onKeyDown} onKeyUp={e => e.stopPropagation()} onPaste={onPaste} onCopy={onCopy}
         onPointerDown={onPointerDown} onBlur={onBlur}
       />
       {menu && createPortal(
