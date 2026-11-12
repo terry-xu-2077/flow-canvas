@@ -21,6 +21,9 @@ const FINAL = new Set(['done', 'failed', 'cancelled'])
 const GEN_EST_HEIGHT = 330
 const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
+// images made by a generation card are 50% larger than the default image size
+const RESULT_WIDTH = Math.round(IMAGE_WIDTH * 1.5)
+const resultHeight = (w: number, h: number) => Math.round((RESULT_WIDTH * h) / w)
 const ratioSize = (ratio: string): [number, number] => {
   const [w, h] = ratio.split(':').map(Number)
   return w > 0 && h > 0 ? [w, h] : [1, 1]
@@ -516,9 +519,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const placeholders: ImageNodeType[] = []
       ids.forEach((jobId, i) => {
         const spot = findFree([...nodesRef.current, ...placeholders], node.position.x + (node.width ?? GEN_WIDTH) + 110,
-          node.position.y + (stacked + i) * (imgHeight(rw, rh) + 90), IMAGE_WIDTH, imgHeight(rw, rh) + 40)
+          node.position.y + (stacked + i) * (resultHeight(rw, rh) + 90), RESULT_WIDTH, resultHeight(rw, rh) + 40)
         placeholders.push({
-          id: `img_${jobId}`, type: 'image', position: spot, width: IMAGE_WIDTH, height: imgHeight(rw, rh),
+          id: `img_${jobId}`, type: 'image', position: spot, width: RESULT_WIDTH, height: resultHeight(rw, rh),
           data: { assetId: '', w: rw, h: rh, prompt: node.data.prompt, pending: true, jobId, status: 'queued', progress: '' },
         })
       })
@@ -564,7 +567,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             const d = (n as ImageNodeType).data
             if (info.status === 'done' && info.result_asset) {
               const w = info.result_w || 1024, h = info.result_h || 1024
-              return { ...n, height: imgHeight(w, h), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
+              return { ...n, height: Math.round(((n.width ?? RESULT_WIDTH) * h) / w), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
             }
             return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
           })
@@ -577,9 +580,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           const k = handled.length - 1
           // stack results in one column to the right of the card so edges stay readable
           const spot = findFree([...next, ...added], gen.position.x + GEN_WIDTH + 110,
-            gen.position.y + k * (imgHeight(w, h) + 70), IMAGE_WIDTH, imgHeight(w, h) + 40)
+            gen.position.y + k * (resultHeight(w, h) + 70), RESULT_WIDTH, resultHeight(w, h) + 40)
           added.push({
-            id: imgId, type: 'image', position: spot, width: IMAGE_WIDTH, height: imgHeight(w, h),
+            id: imgId, type: 'image', position: spot, width: RESULT_WIDTH, height: resultHeight(w, h),
             data: { assetId: info.result_asset, w, h, prompt: gen.data.prompt },
           } as ImageNodeType)
           addedEdges.push({ ...edgeBase, id: `out_${info.id}`, source: gen.id, target: imgId, className: 'out' } as Edge)
