@@ -58,7 +58,8 @@ REM ---------- run (auto-restart if the server exits) ----------
 :loop
 echo.
 echo [%date% %time%] starting Flow Canvas (port is set in config.json) ...
-"venv\Scripts\python.exe" -m server.main
+"venv\Scripts\python.exe" -m server.console
+if %errorlevel%==0 exit /b 0
 echo [%date% %time%] exited (code %errorlevel%), restarting in 5s ... Ctrl+C to stop
 ping -n 6 127.0.0.1 >nul 2>&1
 goto loop
