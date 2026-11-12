@@ -12,7 +12,7 @@ DEFAULT_SEEDVR2 = {
     "unet": "seedvr2_7b_int8_convrot.safetensors",
     "vae": "seedvr2_ema_vae_fp16.safetensors",
     "steps": 1,
-    "color_correction": "none",   # lab / wavelet / adain / none
+    "color_correction": "lab",    # lab (closest to the original) / wavelet / adain / none
     "tile": 512,
 }
 DEFAULT_PID = {

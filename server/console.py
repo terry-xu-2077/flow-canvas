@@ -338,7 +338,8 @@ class Console:
         # --- tab 3: model files used by the enlarge workflows (choices come from ComfyUI once connected)
         from .comfy_workflows import DEFAULT_PID, DEFAULT_SEEDVR2
         combos: dict[str, tuple[str, ctk.CTkComboBox]] = {}
-        spec3 = [("SeedVR2", [("扩散模型", "seedvr2", "unet", "unet_name"), ("VAE", "seedvr2", "vae", "vae_name")]),
+        spec3 = [("SeedVR2", [("扩散模型", "seedvr2", "unet", "unet_name"), ("VAE", "seedvr2", "vae", "vae_name"),
+                                 ("颜色校正", "seedvr2", "color_correction", "color_correction")]),
                  ("PiD", [("扩散模型", "pid", "unet", "unet_name"), ("文本编码器", "pid", "clip", "clip_name"),
                           ("VAE（图片编码）", "pid", "vae", "vae_name")])]
         defaults = {"seedvr2": DEFAULT_SEEDVR2, "pid": DEFAULT_PID}
@@ -351,10 +352,12 @@ class Console:
                 label(t3, text).grid(row=r, column=0, sticky="w", padx=10, pady=5)
                 cb = ctk.CTkComboBox(t3, width=400, values=[cur[eng][key]], font=font, dropdown_font=font)
                 cb.set(cur[eng][key])
+                if key == "color_correction":
+                    cb.configure(values=["lab", "wavelet", "adain", "none"], state="readonly")
                 cb.grid(row=r, column=1, sticky="w", pady=5)
                 combos[f"{eng}.{key}"] = (field, cb)
                 r += 1
-        label(t3, "点“分辨率”页的“测试连接”后，下拉里会列出 ComfyUI 里现有的文件。", DIM, 12).grid(
+        label(t3, "点“分辨率”页的“测试连接”后，下拉里会列出 ComfyUI 里现有的文件。颜色校正：lab 最接近原图，wavelet 保留更多细节，none 不校正。", DIM, 12).grid(
             row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 0))
         if s.comfy_url:
             threading.Thread(target=fetch_models, args=(s.comfy_url,), daemon=True).start()
