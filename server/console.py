@@ -232,8 +232,7 @@ class Console:
         self.log.configure(state="disabled")
 
     def clean_assets(self) -> None:
-        dlg = ctk.CTkInputDialog(text="清理多少天前、没有被任何画板、头像或进行中任务使用的图片？
-（单位：天，最短 1 天）", title="清理未使用的图片")
+        dlg = ctk.CTkInputDialog(text="清理多少天前、没有被任何画板、头像或进行中任务使用的图片？\n（单位：天，最短 1 天）", title="清理未使用的图片")
         raw = (dlg.get_input() or "").strip()
         if not raw:
             return
@@ -245,11 +244,9 @@ class Console:
         res = cleanup.scan(self.settings, days)
         mb = res.bytes / 1048576
         if not res.ids:
-            messagebox.showinfo("清理", f"没有可清理的图片。
-图片共 {res.total_files} 张，其中 {res.kept_young} 张未被使用但不足 {days:g} 天。")
+            messagebox.showinfo("清理", f"没有可清理的图片。\n图片共 {res.total_files} 张，其中 {res.kept_young} 张未被使用但不足 {days:g} 天。")
             return
-        if not messagebox.askyesno("清理", f"找到 {len(res.ids)} 张未使用的图片（共 {mb:.1f} MB），都已超过 {days:g} 天。
-"
+        if not messagebox.askyesno("清理", f"找到 {len(res.ids)} 张未使用的图片（共 {mb:.1f} MB），都已超过 {days:g} 天。\n"
                                          f"删除后无法恢复，确定删除吗？"):
             return
         n, freed = cleanup.delete(self.settings, res.ids)
