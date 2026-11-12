@@ -21,7 +21,7 @@ function emojiImage(emoji: string): string {
   const w = x2 - x1 + 1, h = y2 - y1 + 1
   const out = document.createElement('canvas'); out.width = out.height = N
   const o = out.getContext('2d')!
-  const k = (N * 0.94) / Math.max(w, h)
+  const k = (N * 0.78) / Math.max(w, h)
   o.drawImage(src, x1, y1, w, h, (N - w * k) / 2, (N - h * k) / 2, w * k, h * k)
   const url = out.toDataURL('image/png')
   emojiCache.set(emoji, url)

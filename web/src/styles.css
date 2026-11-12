@@ -478,3 +478,14 @@ button, select, input { border-radius: var(--r-ctl); }
 .rs-slot .rs-tag, .rs-slot .rs-zoom, .rs-slot:not(.rs-empty) .rs-x, .rs-slot:not(.rs-empty) .rs-cap {
   background: #0c0e1255; text-shadow: 0 1px 2px #0008; }
 .rs-slot .rs-zoom:hover, .rs-slot:not(.rs-empty) .rs-x:hover { background: #0c0e1280; }
+
+/* emoji picker: a fixed-height scrolling area so a long list stays inside the menu */
+.up-emojis { grid-template-columns: repeat(7, 1fr); max-height: 168px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; content-visibility: auto; }
+.up-emojis::-webkit-scrollbar { width: 6px; }
+.up-emojis::-webkit-scrollbar-thumb { background: #3a4452; border-radius: 6px; }
+.up-emojis button { height: 32px; font-size: 18px; line-height: 1; }
+.up-label small { margin-left: 4px; color: #5d6978; }
+.up-emojis { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.up-emojis button { min-width: 0; width: 100%; }
+.up-emojis { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 2px 6px 2px 2px; max-height: 176px; }
+.up-emojis button { height: 36px; }

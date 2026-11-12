@@ -2,8 +2,32 @@ import { useEffect, useRef, useState } from 'react'
 import { api, setUser, type UserInfo } from './api'
 import { Avatar } from './Avatar'
 
-const EMOJIS = ['😀', '😎', '🤖', '👻', '🦊', '🐱', '🐶', '🐼', '🦄', '🐸', '🐵', '🐙',
-  '🌟', '🔥', '🌈', '🍀', '🍌', '🍉', '🎨', '🎬', '📷', '🚀', '🎮', '🎧']
+/** Every single-codepoint emoji the system can draw: faces and gestures first, then nature, food, objects, symbols.
+ *  Built from Unicode properties so no list has to be maintained; very new ones are dropped when the font only draws a box. */
+let emojiList: string[] | null = null
+function allEmojis(): string[] {
+  if (emojiList) return emojiList
+  const ranges: [number, number][] = [[0x1F600, 0x1F64F], [0x1F910, 0x1F9FF], [0x1F300, 0x1F5FF], [0x1F680, 0x1F6FF],
+    [0x1FA70, 0x1FAFF], [0x2600, 0x27BF], [0x2B00, 0x2BFF], [0x231A, 0x23FF]]
+  const probe = document.createElement('canvas'); probe.width = probe.height = 32
+  const g = probe.getContext('2d', { willReadFrequently: true })!
+  g.font = '24px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'
+  const drawn = (ch: string) => {
+    g.clearRect(0, 0, 32, 32); g.fillText(ch, 2, 26)
+    const d = g.getImageData(0, 0, 32, 32).data
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128 && (Math.abs(d[i] - d[i + 1]) > 24 || Math.abs(d[i + 1] - d[i + 2]) > 24)) return true
+    return false
+  }
+  const out: string[] = []
+  for (const [lo, hi] of ranges) {
+    for (let cp = lo; cp <= hi; cp++) {
+      const ch = String.fromCodePoint(cp)
+      if (!/^\p{Emoji_Presentation}$/u.test(ch) || (cp >= 0x1FA70 && !drawn(ch))) continue
+      out.push(ch)
+    }
+  }
+  return (emojiList = out)
+}
 const NAME_RE = /^[\w一-鿿\- ]{1,32}$/
 const CACHE = 'fc_me'
 
@@ -70,9 +94,9 @@ export function UserMenu() {
             </div>
           </div>
 
-          <div className="up-label">头像</div>
+          <div className="up-label">头像<small>（可滚动，共 {allEmojis().length} 个）</small></div>
           <div className="up-emojis">
-            {EMOJIS.map(e => (
+            {allEmojis().map(e => (
               <button key={e} className={me.avatar === `emoji:${e}` ? 'on' : ''} disabled={busy} onClick={() => void save({ avatar: `emoji:${e}` })}>{e}</button>
             ))}
           </div>
