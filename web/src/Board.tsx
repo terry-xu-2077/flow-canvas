@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, ViewportPortal,
+  Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
@@ -709,7 +709,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
           onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
-          minZoom={0.1} maxZoom={2} selectionOnDrag panOnDrag={[1, 2]} panActivationKeyCode="Space"
+          minZoom={0.1} maxZoom={2} selectionOnDrag selectionMode={SelectionMode.Partial} panOnDrag={[1, 2]} panActivationKeyCode="Space"
           selectionKeyCode={null} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
           deleteKeyCode={['Delete', 'Backspace']} proOptions={{ hideAttribution: true }}
           colorMode="dark" fitView={false}
