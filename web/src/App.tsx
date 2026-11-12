@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, clearUser, getUser, setUser, type BoardMeta, type UserInfo } from './api'
 import { Avatar } from './Avatar'
 import { UserMenu } from './UserMenu'
+import { NAME_RE, ProfileEditor, resolveAvatar, type AvatarChoice } from './ProfileEditor'
 import Board from './Board'
 import { BrandMark } from './icons'
 import UsageBadge from './UsageBadge'
@@ -22,7 +23,9 @@ function Login({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
-  const ok = /^[\w一-鿿\- ]{1,32}$/.test(name.trim())
+  const [choice, setChoice] = useState<AvatarChoice>({ kind: 'none' })
+  const [busy, setBusy] = useState(false)
+  const ok = NAME_RE.test(name.trim())
   useEffect(() => { api.users().then(setUsers).catch(() => setUsers([])) }, [])
   const enter = (id: string) => { setUser(id); onDone() }
   return (
@@ -37,22 +40,29 @@ function Login({ onDone }: { onDone: () => void }) {
             <Avatar name={u.name} avatar={u.avatar} size={22} />{u.name}<em>{u.boards}</em>
           </button>
         ))}
-        <button className="user-chip add" onClick={() => { setName(''); setCreating(true) }}>＋ 创建用户</button>
+        <button className="user-chip add" onClick={() => { setName(''); setChoice({ kind: 'none' }); setError(''); setCreating(true) }}>＋ 创建用户</button>
       </div>
       {creating && (
-        <div className="modal-back" onMouseDown={() => setCreating(false)}>
-          <form className="modal" onMouseDown={e => e.stopPropagation()}
+        <div className="modal-back" onMouseDown={() => !busy && setCreating(false)}>
+          <form className="modal wide" onMouseDown={e => e.stopPropagation()}
                 onSubmit={async e => {
                   e.preventDefault()
-                  if (!ok) return
-                  try { enter((await api.createUser(name.trim())).id) } catch (err) { setError((err as Error).message) }
+                  if (!ok || busy) return
+                  setBusy(true)
+                  try {
+                    const created = await api.createUser(name.trim())
+                    setUser(created.id)
+                    // the avatar needs the new login (uploads and profile updates are per user); failing here must not block entering
+                    if (choice.kind !== 'none') { try { await api.updateMe({ avatar: await resolveAvatar(choice) }) } catch { /* keep the initial letter */ } }
+                    onDone()
+                  } catch (err) { setError((err as Error).message); setBusy(false) }
                 }}>
             <strong>创建用户</strong>
-            <input autoFocus value={name} onChange={e => { setName(e.target.value); setError('') }} placeholder="名字（1–32 个字符）" />
+            <ProfileEditor name={name} onName={v => { setName(v); setError('') }} choice={choice} onChoice={setChoice} busy={busy} autoFocusName />
             {error && <div className="up-err">{error}</div>}
             <div className="modal-actions">
-              <button type="button" onClick={() => setCreating(false)}>取消</button>
-              <button className="primary" disabled={!ok}>创建并进入</button>
+              <button type="button" disabled={busy} onClick={() => setCreating(false)}>取消</button>
+              <button className="primary" disabled={!ok || busy}>创建并进入</button>
             </div>
           </form>
         </div>

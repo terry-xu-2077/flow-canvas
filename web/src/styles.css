@@ -515,3 +515,14 @@ button, select, input { border-radius: var(--r-ctl); }
 .login .login-head .tagline { margin-bottom: 0; }
 .login .login-head { margin-bottom: 50px; }
 .login .tagline { font-size: 15.84px; }
+
+/* profile editor (create user / edit profile dialogs) */
+.modal.wide { width: 380px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.pe-form { display: flex; flex-direction: column; gap: 10px; }
+.pf-top { display: flex; align-items: center; gap: 14px; }
+.pf-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pe-form input[type=text], .pe-form input:not([type]) { width: 100%; box-sizing: border-box; }
+.up-head { position: relative; }
+.up-edit { margin-left: auto; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: 10px; color: var(--muted); }
+button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
+.user-pop { width: 260px; }
