@@ -1,4 +1,4 @@
-# Flow 画布
+# Terry Flow
 
 局域网多人使用的无限画布生图服务，后端对接自建的 [flow2api](../flow2api)。
 

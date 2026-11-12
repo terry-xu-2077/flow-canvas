@@ -27,7 +27,7 @@ function Login({ onDone }: { onDone: () => void }) {
   const enter = (id: string) => { setUser(id); onDone() }
   return (
     <div className="center-msg login">
-      <h1><BrandMark size={30} /> Flow 画布</h1>
+      <h1><BrandMark size={30} /> Terry Flow</h1>
       <p>选择用户，画板会按用户分开保存</p>
       <div className="user-pick">
         {users?.map(u => (
@@ -78,7 +78,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
   return (
     <div className="list">
       <header>
-        <h1><BrandMark size={30} /> Flow 画布</h1>
+        <h1><BrandMark size={30} /> Terry Flow</h1>
         <span className="who"><UsageBadge /><UserMenu /><button onClick={onLogout}>切换用户</button></span>
       </header>
       {error && <div className="banner">{error}</div>}

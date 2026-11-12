@@ -206,7 +206,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .dock .primary .ico { color: inherit; }
 .ico.brand { flex: none; }
 .toolbar .brand { width: 32px; height: 32px; margin: 0 2px 0 0; } /* as tall as the buttons next to it */
-.list h1 .brand, .login h1 .brand { width: 30px; height: 30px; }
+.list h1 .brand { width: 30px; height: 30px; }
 .list h1 { display: flex; align-items: center; gap: 10px; }
 .login h1 { display: flex; align-items: center; gap: 10px; }
 .layers li .ico { margin-right: 4px; }
@@ -499,3 +499,7 @@ button, select, input { border-radius: var(--r-ctl); }
 
 /* picture nodes: the picture always fills the card (a sub-pixel ratio difference is cropped instead of showing a dark edge) */
 .card.image img { object-fit: cover; background: transparent; }
+
+/* login title: big mark and app name */
+.login h1 { font-size: 64px; line-height: 1; gap: 22px; margin: 0 0 18px; font-weight: 700; letter-spacing: -0.5px; }
+.login h1 .brand { width: 100px; height: 100px; }
