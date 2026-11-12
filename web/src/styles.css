@@ -400,7 +400,7 @@ button, select, input { border-radius: var(--r-ctl); }
 .list header .who .usage { margin-right: 8px; }
 
 /* collection slots keep a bounded size: when the node grows, more slots are laid out per row instead of the slots scaling up */
-.rs-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 210px)); justify-content: start; }
+.rs-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 147px)); justify-content: start; }
 
 /* avatar + user dropdown */
 .avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover; overflow: hidden;
