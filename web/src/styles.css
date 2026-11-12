@@ -473,3 +473,8 @@ button, select, input { border-radius: var(--r-ctl); }
 .rs-slot:not(.rs-empty) { background: #d3d7dd; }
 .rs-slot img { object-fit: contain; }
 .rs-slot:not(.rs-empty) .rs-cap { left: 8px; right: auto; bottom: 8px; padding: 2px 8px; max-width: calc(100% - 56px); border-radius: 6px; background: #0c0e12b8; backdrop-filter: blur(4px); }
+
+/* the four overlays on a slot picture (tag, enlarge, clear, caption): more see-through */
+.rs-slot .rs-tag, .rs-slot .rs-zoom, .rs-slot:not(.rs-empty) .rs-x, .rs-slot:not(.rs-empty) .rs-cap {
+  background: #0c0e1255; text-shadow: 0 1px 2px #0008; }
+.rs-slot .rs-zoom:hover, .rs-slot:not(.rs-empty) .rs-x:hover { background: #0c0e1280; }
