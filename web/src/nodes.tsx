@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { assetUrl } from './api'
 import { useCanvas } from './CanvasContext'
@@ -36,6 +36,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const { deleteElements } = useReactFlow()
   const [open, setOpen] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
+  const [popUp, setPopUp] = useState<number | null>(null) // bottom offset (px, canvas units) when the settings pop opens upwards
   const model = canvas.models.find(m => m.key === data.model) ?? canvas.models[0]
   const running = data.jobs.some(j => !FINAL.has(j.status))
   const refs = canvas.refCount(id)
@@ -51,6 +52,22 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
     return () => document.removeEventListener('mousedown', close)
   }, [open])
   useEffect(() => { if (!selected) setOpen(false) }, [selected])
+  // Open downwards by default; when the bottom of the window (dock included) is too close, open upwards from the summary bar.
+  useLayoutEffect(() => {
+    setPopUp(null)
+    if (!open) return
+    const pop = popRef.current
+    const card = pop?.parentElement
+    const sum = card?.querySelector('.summary')
+    if (!pop || !card || !sum) return
+    pop.style.bottom = ''
+    const pr = pop.getBoundingClientRect(), cr = card.getBoundingClientRect(), sr = sum.getBoundingClientRect()
+    const scale = cr.height / Math.max(1, (card as HTMLElement).offsetHeight) || 1
+    const reserve = 90 // the floating dock
+    const below = innerHeight - reserve - pr.top
+    const above = sr.top - 8
+    if (pr.height > below && above > below) setPopUp((cr.bottom - sr.top) / scale + 8)
+  }, [open])
 
   const pickModel = (key: string) => {
     const next = canvas.models.find(m => m.key === key)
@@ -85,7 +102,8 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         </button>
       </div>
       {open && (
-        <div className="pop nodrag nowheel nopan" ref={popRef}>
+        <div className={`pop nodrag nowheel nopan${popUp !== null ? " up" : ""}`} ref={popRef}
+             style={popUp !== null ? { top: "auto", bottom: popUp } : undefined}>
           <div className="pop-title">图像设置</div>
           <div className="pop-label">模型</div>
           <div className="models">
