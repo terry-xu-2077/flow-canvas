@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { api, assetUrl } from './api'
 import { useCanvas } from './CanvasContext'
@@ -16,6 +16,14 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
   const pickFor = useRef<string | null>(null)
   const dragId = useRef<string | null>(null)
   const [busy, setBusy] = useState(0)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRoot = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (e: MouseEvent) => { if (!menuRoot.current?.contains(e.target as Node)) setMenuOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menuOpen])
   const [overSlot, setOverSlot] = useState<string | null>(null)
   const slots = data.slots
   const filledCount = slots.filter(s => s.assetId).length
@@ -86,20 +94,24 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
         }}
       >
         <div className="rs-head">
-          <button className="icon nodrag" title={data.collapsed ? '展开' : '收起'}
-                  onClick={() => canvas.patchNode(id, { collapsed: !data.collapsed })}>{data.collapsed ? '▸' : '▾'}</button>
           <CollectionIcon className="ico-collection" />
           <strong>参考集合</strong>
           <span className="rs-count">{filledCount} 张{busy ? ` · 上传中 ${busy}` : ''}</span>
           <span className="grow" />
-          <button className="nodrag" title="解散集合：拆成独立的图片节点，连线和提示词里的编号保持不变"
-                  onClick={() => canvas.dissolve(id)}>解散</button>
-          {!data.collapsed && (
-            <button className="nodrag" title="添加空槽位" onClick={() => canvas.editSlots(id, ss => [...ss, { id: uid() }])}>＋</button>
-          )}
-          <button className="icon nodrag" title="删除集合" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
+          <div className="rs-menu-wrap nodrag" ref={menuRoot}>
+            <button className={`icon rs-more${menuOpen ? ' open' : ''}`} title="更多" onClick={() => setMenuOpen(o => !o)}>
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="3" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="8" cy="13" r="1.5" /></svg>
+            </button>
+            {menuOpen && (
+              <div className="rs-menu">
+                <button onClick={() => { setMenuOpen(false); canvas.editSlots(id, ss => [...ss, { id: uid() }]) }}>添加空槽位</button>
+                <button title="拆成独立的图片节点，连线和提示词里的编号保持不变" onClick={() => { setMenuOpen(false); canvas.dissolve(id) }}>解散集合</button>
+                <button className="danger" onClick={() => { setMenuOpen(false); deleteElements({ nodes: [{ id }] }) }}>删除集合</button>
+              </div>
+            )}
+          </div>
         </div>
-        {!data.collapsed && (
+        {(
           <div className="rs-grid nowheel">
             {slots.map((slot, idx) => {
               return (

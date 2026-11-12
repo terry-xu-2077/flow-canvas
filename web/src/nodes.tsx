@@ -33,7 +33,6 @@ function Segmented<T extends string | number>(props: {
 
 export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const canvas = useCanvas()
-  const { deleteElements } = useReactFlow()
   const [open, setOpen] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
   const [popUp, setPopUp] = useState<number | null>(null) // bottom offset (px, canvas units) when the settings pop opens upwards
@@ -86,7 +85,6 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
         <span className="node-title"><BananaIcon className="ico-banana" />生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
-        <button className="icon nodrag" title="删除卡片" onClick={() => deleteElements({ nodes: [{ id }] })}>✕</button>
       </div>
       <PromptEditor
         value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}

@@ -434,3 +434,13 @@ button, select, input { border-radius: var(--r-ctl); }
 .who .user-pill.user-btn, .list header .who .user-pill.user-btn { height: 32px; padding: 0 10px 0 4px; gap: 8px; color: var(--muted); background: var(--panel2); border-radius: 999px; }
 .who .user-pill.user-btn:hover, .who .user-pill.user-btn.open { color: #dfe6ee; }
 .avatar.emoji { font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+
+/* collection header: a single ⋮ button with the actions in a dropdown */
+.rs-menu-wrap { position: relative; }
+.rs-more { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border-radius: 10px; color: var(--muted); background: transparent; border: 0; }
+.rs-more:hover, .rs-more.open { background: #ffffff12; color: #dfe6ee; }
+.rs-menu { position: absolute; right: 0; top: 32px; z-index: 30; min-width: 140px; display: flex; flex-direction: column; padding: 6px; border-radius: 14px;
+  background: #171c22; border: 1px solid #2c343f; box-shadow: 0 14px 34px #000a; }
+.rs-menu button { text-align: left; padding: 8px 12px; border: 0; background: transparent; color: #dfe6ee; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; white-space: nowrap; }
+.rs-menu button:hover { background: #ffffff12; }
+.rs-menu button.danger { color: #ff8a80; }
