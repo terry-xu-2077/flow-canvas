@@ -7,6 +7,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
+import { copyAssetImage } from './clipboard'
 import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
 import { nodeTypes } from './nodes'
 import { edgeTypes } from './DeletableEdge'
@@ -138,6 +139,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [toast, setToast] = useState<{ text: string; err?: boolean; n: number } | null>(null)
+  const showToast = useCallback((text: string, err = false) => setToast(t => ({ text, err, n: (t?.n ?? 0) + 1 })), [])
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
   const [dropMenu, setDropMenu] = useState<{ files: File[]; at?: { x: number; y: number }; x: number; y: number } | null>(null)
   const [snapOn, setSnapOn] = useState(() => localStorage.getItem('fc_snap') === '1')
   const [guides, setGuides] = useState<Guides>(NO_GUIDES)
@@ -451,6 +459,25 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
   }, [placeImages, addToRefset])
+
+  // Ctrl/Cmd+C on selected pictures copies the picture itself (as an image) to the system clipboard.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'c') return
+      const t = e.target as HTMLElement | null
+      if (t && (['TEXTAREA', 'INPUT', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return
+      if (getSelection()?.toString()) return // the user is copying selected text
+      const imgs = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && !!n.selected && !n.data.pending && !!n.data.assetId)
+      if (!imgs.length) return
+      e.preventDefault()
+      const first = [...imgs].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)[0]
+      copyAssetImage(first.data.assetId)
+        .then(() => showToast(imgs.length > 1 ? `已复制 1 张图片（剪贴板一次只能放一张，复制的是最靠前的）` : '已复制图片到剪贴板'))
+        .catch(err => showToast(`复制失败：${(err as Error).message}`, true))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showToast])
 
   const fitAll = useCallback(() => { void rf.fitView({ duration: 250, padding: 0.2, maxZoom: 1 }) }, [rf])
   const focusNode = useCallback((id: string) => {
@@ -771,6 +798,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             )}
           </div>
         )}
+        {toast && <div key={toast.n} className={`toast${toast.err ? ' err' : ''}`}>{toast.text}</div>}
         {dropMenu && (
           <>
             <div className="drop-backdrop" onPointerDown={() => setDropMenu(null)} />

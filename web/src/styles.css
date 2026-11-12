@@ -489,3 +489,10 @@ button, select, input { border-radius: var(--r-ctl); }
 .up-emojis button { min-width: 0; width: 100%; }
 .up-emojis { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 2px 6px 2px 2px; max-height: 176px; }
 .up-emojis button { height: 36px; }
+
+/* short confirmation message above the dock */
+.toast { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 60; padding: 9px 16px; border-radius: 999px;
+  background: #1b2027; border: 1px solid #3a4452; color: #e6ebf1; font-size: 13px; box-shadow: 0 10px 30px #0008; pointer-events: none;
+  animation: toast-in .16s ease-out; }
+.toast.err { border-color: #ff7a7a66; color: #ffc9c9; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
