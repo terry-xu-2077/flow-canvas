@@ -5,12 +5,16 @@ export interface JobInfo {
   progress: string; error: string | null; result_asset: string | null; model: string
   result_w: number | null; result_h: number | null
 }
+export interface UserInfo { id: string; name: string; avatar: string; boards?: number }
 export interface AssetInfo { id: string; w: number; h: number; mime: string }
 
 const USER_KEY = 'fc_user'
 export const getUser = () => localStorage.getItem(USER_KEY) || ''
-export const setUser = (name: string) => localStorage.setItem(USER_KEY, name)
-export const clearUser = () => localStorage.removeItem(USER_KEY)
+export const setUser = (id: string) => {
+  if (getUser() !== id) localStorage.removeItem('fc_me') // cached profile of the previous user
+  localStorage.setItem(USER_KEY, id)
+}
+export const clearUser = () => { localStorage.removeItem(USER_KEY); localStorage.removeItem('fc_me') }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
@@ -31,7 +35,10 @@ const json = (method: string, body: unknown): RequestInit => ({
 export const api = {
   models: () => call<{ models: ModelInfo[]; max_count: number }>('/api/models'),
   usage: () => call<{ credits: number | null; image_daily: { name: string; used: number; limit: number }[]; date?: string }>('/api/usage'),
-  users: () => call<{ users: { user: string; boards: number; updated: number }[] }>('/api/users').then(r => r.users),
+  users: () => call<{ users: UserInfo[] }>('/api/users').then(r => r.users),
+  createUser: (name: string) => call<UserInfo>('/api/users', json('POST', { name })),
+  me: () => call<UserInfo>('/api/me'),
+  updateMe: (patch: { name?: string; avatar?: string }) => call<UserInfo>('/api/me', json('PUT', patch)),
   boards: () => call<{ boards: BoardMeta[] }>('/api/boards').then(r => r.boards),
   createBoard: (name: string) => call<BoardMeta>('/api/boards', json('POST', { name })),
   getBoard: (id: string) => call<{ id: string; name: string; data: any }>(`/api/boards/${id}`),

@@ -401,3 +401,31 @@ button, select, input { border-radius: var(--r-ctl); }
 
 /* collection slots keep a bounded size: when the node grows, more slots are laid out per row instead of the slots scaling up */
 .rs-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 210px)); justify-content: start; }
+
+/* avatar + user dropdown */
+.avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover; overflow: hidden;
+  line-height: 1; user-select: none; }
+.avatar.initial { color: #eef2f6; font-weight: 600; }
+.avatar.emoji { background: #2a313b; }
+.user-menu { position: relative; }
+.user-pill.user-btn { gap: 8px; padding: 0 10px 0 4px; cursor: pointer; border: 0; font: inherit; font-size: 13px; color: var(--muted); }
+.user-pill.user-btn:hover, .user-pill.user-btn.open { color: #dfe6ee; }
+.user-btn .chev { transition: transform .15s; opacity: .7; }
+.user-btn.open .chev { transform: rotate(90deg); }
+.user-pop { position: absolute; right: 0; top: 40px; width: 288px; z-index: 30; display: flex; flex-direction: column; gap: 10px;
+  padding: 16px; border-radius: 18px; background: #171c22; border: 1px solid #2c343f; box-shadow: 0 18px 44px #000a; color: #dfe6ee; }
+.up-head { display: flex; align-items: center; gap: 12px; }
+.up-who { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.up-who strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-who small { color: #7d8896; font-size: 11px; }
+.up-label { color: #7d8896; font-size: 12px; margin-top: 2px; }
+.up-emojis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.up-emojis button { height: 34px; padding: 0; font-size: 18px; border-radius: 10px; background: transparent; border: 1px solid transparent; cursor: pointer; }
+.up-emojis button:hover { background: #ffffff10; }
+.up-emojis button.on { border-color: #8fa0b5; background: #ffffff10; }
+.up-row { display: flex; gap: 8px; }
+.up-row input { flex: 1; min-width: 0; }
+.up-row button { white-space: nowrap; }
+.up-err { color: #ff8a80; font-size: 12px; }
+.user-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px 5px 6px; }
+.modal .up-err { margin-top: -6px; }

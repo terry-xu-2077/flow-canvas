@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import sqlite3
 import uuid
 import zipfile
 from urllib.parse import quote
@@ -24,6 +25,13 @@ from .flow import FlowClient, FlowError, model_id
 from .jobs import JobRunner
 
 USER_RE = re.compile(r"^[\w一-鿿\- ]{1,32}$")
+ID_RE = re.compile(r"^[0-9a-f]{32}$")
+AVATAR_RE = re.compile(r"^(emoji:.{1,16}|asset:[0-9a-f]{40})?$")
+
+
+class UserBody(BaseModel):
+    name: Optional[str] = None
+    avatar: Optional[str] = None
 
 
 class JobRequest(BaseModel):
@@ -72,11 +80,15 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     app.state.settings, app.state.store, app.state.flow, app.state.runner = settings, store, flow, runner
 
     def decode_user(x_user: Optional[str] = Header(default=None)) -> str:
+        """The X-User header carries the user's uuid; a plain name still works for clients from before ids existed."""
         from urllib.parse import unquote
-        user = unquote((x_user or "").strip())
-        if not USER_RE.match(user):
-            raise HTTPException(401, "请先填写用户名（1–32 个字符）")
-        return user
+        value = unquote((x_user or "").strip())
+        if ID_RE.match(value) and store.get_user(value):
+            return value
+        found = store.get_user_by_name(value) if value else None
+        if not found:
+            raise HTTPException(401, "请先选择用户")
+        return found["id"]
 
     user_dep = Depends(decode_user)
 
@@ -111,8 +123,38 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     # ---- boards
     @app.get("/api/users")
     async def list_users():
-        # names that already have boards, so the login page can offer them (LAN tool, names are not secret)
+        # LAN tool: the login page offers the existing users (id, name, avatar)
         return {"users": store.list_users()}
+
+    @app.post("/api/users")
+    async def create_user(body: UserBody):
+        name = (body.name or "").strip()
+        if not USER_RE.match(name):
+            raise HTTPException(400, "名字需要 1–32 个字符")
+        try:
+            return store.create_user(name)
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "这个名字已经有人用了")
+
+    @app.get("/api/me")
+    async def me(user: str = user_dep):
+        return store.get_user(user)
+
+    @app.put("/api/me")
+    async def update_me(body: UserBody, user: str = user_dep):
+        name = body.name.strip() if body.name is not None else None
+        if name is not None and not USER_RE.match(name):
+            raise HTTPException(400, "名字需要 1–32 个字符")
+        if body.avatar is not None:
+            if not AVATAR_RE.match(body.avatar):
+                raise HTTPException(400, "头像格式不正确")
+            if body.avatar.startswith("asset:") and not store.get_asset(body.avatar[6:]):
+                raise HTTPException(400, "头像图片不存在")
+        try:
+            store.update_user(user, name=name, avatar=body.avatar)
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "这个名字已经有人用了")
+        return store.get_user(user)
 
     @app.get("/api/boards")
     async def list_boards(user: str = user_dep):

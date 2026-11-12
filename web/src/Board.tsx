@@ -5,12 +5,13 @@ import {
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { api, assetUrl, downloadUrl, getUser, type JobInfo, type ModelInfo } from './api'
+import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo } from './api'
 import { CanvasContext } from './CanvasContext'
 import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
 import { nodeTypes } from './nodes'
 import { edgeTypes } from './DeletableEdge'
 import UsageBadge from './UsageBadge'
+import { UserMenu } from './UserMenu'
 import type { RefInfo } from './PromptEditor'
 import {
   GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
@@ -705,7 +706,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
           </Panel>
-          <Panel position="top-right" className="toolbar who"><UsageBadge /><span className="user-pill">{getUser()}</span></Panel>
+          <Panel position="top-right" className="toolbar who"><UsageBadge /><UserMenu /></Panel>
           {layersOpen && (
             <Panel position="top-right" className="layers">
               <div className="layers-head"><strong>图层</strong>

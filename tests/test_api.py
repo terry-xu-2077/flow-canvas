@@ -78,7 +78,9 @@ def env(tmp_path):
     flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle), timeout=20)
     app = create_app(settings, flow)
     with TestClient(app) as client:
-        client.headers["X-User"] = urllib.parse.quote("小明")
+        client.post("/api/users", json={"name": "小红"})
+        me = client.post("/api/users", json={"name": "小明"}).json()
+        client.headers["X-User"] = me["id"]
         yield client, fake, settings
 
 
@@ -238,7 +240,7 @@ def test_disabled_options_are_hidden_and_refused(tmp_path):
                         disabled_models=("gemini-3.1-flash-image",), max_count=2)
     flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
     with TestClient(create_app(settings, flow)) as client:
-        client.headers["X-User"] = urllib.parse.quote("小明")
+        client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
         assert client.get("/api/models").json() == {"models": [], "max_count": 2}
         r = client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"})
         assert r.status_code == 400 and "关闭" in r.json()["error"]
@@ -250,7 +252,7 @@ def test_disabled_sizes_and_count_limit(tmp_path):
                         disabled_sizes=("2K",), max_count=2)
     flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
     with TestClient(create_app(settings, flow)) as client:
-        client.headers["X-User"] = urllib.parse.quote("小明")
+        client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
         models = client.get("/api/models").json()
         assert models["models"][0]["sizes"] == ["1K"] and models["max_count"] == 2
         ok = {"model": "gemini-3.1-flash-image", "prompt": "x"}
@@ -321,3 +323,36 @@ def test_error_status_code_fails_the_job(env):
     fake.no_result = True
     job = wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "x"}).json()["jobs"][0])
     assert job["status"] == "failed" and "没有可用的Token" in job["error"]
+
+
+def test_users_have_uuid_unique_names_and_editable_profile(env):
+    client, _, _ = env
+    me = client.get("/api/me").json()
+    assert len(me["id"]) == 32 and me["name"] == "小明" and me["avatar"] == ""
+    assert client.post("/api/users", json={"name": "小明"}).status_code == 409
+    assert client.post("/api/users", json={"name": "bad/name"}).status_code == 400
+    listed = {u["name"]: u for u in client.get("/api/users", headers={"X-User": ""}).json()["users"]}
+    assert set(listed) == {"小明", "小红"} and listed["小明"]["id"] == me["id"]
+    # rename keeps the id (and the boards under it); taken names are refused
+    bid = client.post("/api/boards", json={"name": "a"}).json()["id"]
+    assert client.put("/api/me", json={"name": "小红"}).status_code == 409
+    assert client.put("/api/me", json={"name": "阿明"}).json()["name"] == "阿明"
+    assert client.get(f"/api/boards/{bid}").status_code == 200
+    # avatars: emoji, uploaded image, or nothing; anything else is refused
+    assert client.put("/api/me", json={"avatar": "emoji:🐱"}).json()["avatar"] == "emoji:🐱"
+    assert client.put("/api/me", json={"avatar": "http://evil"}).status_code == 400
+    assert client.put("/api/me", json={"avatar": "asset:" + "0" * 40}).status_code == 400
+    assert client.put("/api/me", json={"avatar": ""}).json()["avatar"] == ""
+
+
+def test_old_name_keyed_data_is_migrated_to_user_ids(tmp_path):
+    from server.db import Store
+    path = tmp_path / "old.db"
+    store = Store(path)
+    store.create_board("老用户", "b1", "旧画板")  # as written by the version that keyed boards by name
+    store._db.execute("DELETE FROM users"); store._db.commit()
+    store = Store(path)
+    user = store.get_user_by_name("老用户")
+    assert user and len(user["id"]) == 32
+    assert store.list_boards(user["id"])[0]["name"] == "旧画板"
+    assert store.list_boards("老用户") == []

@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,6 +26,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_asset TEXT, created REAL NOT NULL, started REAL, finished REAL
 );
 CREATE INDEX IF NOT EXISTS jobs_user ON jobs (user, created);
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, avatar TEXT NOT NULL DEFAULT '', created REAL NOT NULL
+);
 """
 
 
@@ -37,6 +41,7 @@ class Store:
         with self._lock:
             self._db.executescript(SCHEMA)
             self._db.commit()
+        self._migrate_users()
 
     # -- helpers
     def _one(self, sql: str, args: tuple = ()) -> Optional[dict]:
@@ -55,10 +60,45 @@ class Store:
             return cur.rowcount
 
     # -- boards
+    # -- users (id is a random uuid; boards.user / jobs.user hold that id, the name can change)
+    def _migrate_users(self) -> None:
+        """Boards and jobs used to be keyed by the user's name: give each such name a user row and re-key the rows."""
+        with self._lock:
+            known = {r["id"] for r in self._db.execute("SELECT id FROM users")}
+            names = {r[0] for r in self._db.execute("SELECT user FROM boards UNION SELECT user FROM jobs")}
+            for name in sorted(names - known):
+                row = self._db.execute("SELECT id FROM users WHERE name=?", (name,)).fetchone()
+                uid = row["id"] if row else uuid.uuid4().hex
+                if not row:
+                    self._db.execute("INSERT INTO users (id,name,avatar,created) VALUES (?,?,?,?)", (uid, name, "", time.time()))
+                self._db.execute("UPDATE boards SET user=? WHERE user=?", (uid, name))
+                self._db.execute("UPDATE jobs SET user=? WHERE user=?", (uid, name))
+            self._db.commit()
+
     def list_users(self) -> list[dict]:
         return self._all(
-            "SELECT user, COUNT(*) AS boards, MAX(updated) AS updated FROM boards GROUP BY user ORDER BY updated DESC")
+            "SELECT u.id, u.name, u.avatar, COUNT(b.id) AS boards, COALESCE(MAX(b.updated), u.created) AS updated "
+            "FROM users u LEFT JOIN boards b ON b.user=u.id GROUP BY u.id ORDER BY updated DESC")
 
+    def get_user(self, user_id: str) -> Optional[dict]:
+        return self._one("SELECT id, name, avatar, created FROM users WHERE id=?", (user_id,))
+
+    def get_user_by_name(self, name: str) -> Optional[dict]:
+        return self._one("SELECT id, name, avatar, created FROM users WHERE name=?", (name,))
+
+    def create_user(self, name: str) -> dict:
+        """Raises sqlite3.IntegrityError when the name is taken."""
+        uid = uuid.uuid4().hex
+        self._run("INSERT INTO users (id,name,avatar,created) VALUES (?,?,?,?)", (uid, name, "", time.time()))
+        return self.get_user(uid)  # type: ignore[return-value]
+
+    def update_user(self, user_id: str, name: Optional[str] = None, avatar: Optional[str] = None) -> None:
+        if name is not None:
+            self._run("UPDATE users SET name=? WHERE id=?", (name, user_id))
+        if avatar is not None:
+            self._run("UPDATE users SET avatar=? WHERE id=?", (avatar, user_id))
+
+    # -- boards
     def list_boards(self, user: str) -> list[dict]:
         return self._all(
             "SELECT id, name, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))
