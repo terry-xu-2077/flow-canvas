@@ -7,7 +7,7 @@ export function Avatar({ name, avatar, size = 24 }: { name: string; avatar?: str
     return <img className="avatar" style={style} src={assetUrl(avatar.slice(6), Math.max(96, size * 2))} alt="" draggable={false} />
   }
   if (avatar?.startsWith('emoji:')) {
-    return <span className="avatar emoji" style={{ ...style, fontSize: Math.round(size * 0.58) }}>{avatar.slice(6)}</span>
+    return <span className="avatar emoji" style={{ ...style, fontSize: Math.round(size * 0.8) }}>{avatar.slice(6)}</span>
   }
   const first = (Array.from(name.trim())[0] ?? '?').toUpperCase()
   let h = 0

@@ -394,7 +394,7 @@ button, select, input { border-radius: var(--r-ctl); }
 .list header { min-height: 32px; margin-bottom: 16px; }
 .list h1 { gap: 8px; font-size: 20px; }
 .list h1 .brand { width: 32px; height: 32px; }
-.list header .who button { height: 32px; padding: 0 14px; border-radius: 14px; }
+.list header .who button:not(.user-btn) { height: 32px; padding: 0 14px; border-radius: 14px; }
 .list .grid { margin-top: 0; }
 .list header .who { gap: 8px; }
 .list header .who .usage { margin-right: 8px; }
@@ -429,3 +429,8 @@ button, select, input { border-radius: var(--r-ctl); }
 .up-err { color: #ff8a80; font-size: 12px; }
 .user-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px 5px 6px; }
 .modal .up-err { margin-top: -6px; }
+
+/* the user pill looks identical on the list page and in the board; emoji fill the avatar circle */
+.who .user-pill.user-btn, .list header .who .user-pill.user-btn { height: 32px; padding: 0 10px 0 4px; gap: 8px; color: var(--muted); background: var(--panel2); border-radius: 999px; }
+.who .user-pill.user-btn:hover, .who .user-pill.user-btn.open { color: #dfe6ee; }
+.avatar.emoji { font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
