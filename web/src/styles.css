@@ -394,7 +394,7 @@ button, select, input { border-radius: var(--r-ctl); }
 .list header { min-height: 32px; margin-bottom: 16px; }
 .list h1 { gap: 8px; font-size: 20px; }
 .list h1 .brand { width: 32px; height: 32px; }
-.list header .who button:not(.user-btn) { height: 32px; padding: 0 14px; border-radius: 14px; }
+.list header .who > button { height: 32px; padding: 0 14px; border-radius: 14px; }
 .list .grid { margin-top: 0; }
 .list header .who { gap: 8px; }
 .list header .who .usage { margin-right: 8px; }
