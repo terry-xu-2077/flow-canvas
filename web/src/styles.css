@@ -468,3 +468,8 @@ button, select, input { border-radius: var(--r-ctl); }
 .rs-slot .rs-zoom:hover { color: #fff; }
 .rs-slot:not(.rs-empty) .rs-x { top: auto; bottom: 8px; right: 8px; }
 .rs-slot:not(.rs-empty) .rs-cap { padding-right: 42px; }
+
+/* pictures are shown whole (not cropped); the empty area around them is light grey */
+.rs-slot:not(.rs-empty) { background: #d3d7dd; }
+.rs-slot img { object-fit: contain; }
+.rs-slot:not(.rs-empty) .rs-cap { left: 8px; right: auto; bottom: 8px; padding: 2px 8px; max-width: calc(100% - 56px); border-radius: 6px; background: #0c0e12b8; backdrop-filter: blur(4px); }
