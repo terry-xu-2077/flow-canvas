@@ -1,4 +1,6 @@
 export interface ModelInfo { key: string; name: string; ratios: string[]; sizes: string[] }
+export interface UpscaleOption { size: string; target: number; engine: string }
+export interface UpscaleInfo { enabled: boolean; options: UpscaleOption[] }
 export interface BoardMeta { id: string; name: string; created: number; updated: number }
 export interface JobInfo {
   id: string; node: string | null; status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
@@ -33,7 +35,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 export const api = {
-  models: () => call<{ models: ModelInfo[]; max_count: number; upscale?: { enabled: boolean; label: string; target: number } }>('/api/models'),
+  models: () => call<{ models: ModelInfo[]; max_count: number; upscale?: UpscaleInfo }>('/api/models'),
   usage: () => call<{ credits: number | null; image_daily: { name: string; used: number; limit: number }[]; date?: string }>('/api/usage'),
   users: () => call<{ users: UserInfo[] }>('/api/users').then(r => r.users),
   createUser: (name: string) => call<UserInfo>('/api/users', json('POST', { name })),
@@ -67,7 +69,7 @@ export const api = {
     board: string; node: string; model: string; ratio: string; size: string
     prompt: string; refs: string[]; count: number
   }) => call<{ jobs: string[] }>('/api/jobs', json('POST', req)).then(r => r.jobs),
-  upscale: (asset: string, board: string) => call<{ jobs: string[]; label: string }>('/api/upscale', json('POST', { asset, board })),
+  upscale: (asset: string, board: string, size: string) => call<{ jobs: string[]; label: string }>('/api/upscale', json('POST', { asset, board, size })),
   jobs: (ids: string[]) => call<{ jobs: JobInfo[] }>(`/api/jobs?ids=${ids.join(',')}`).then(r => r.jobs),
   cancelJob: (id: string) => call<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
 }

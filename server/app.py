@@ -48,6 +48,7 @@ class JobRequest(BaseModel):
 class UpscaleBody(BaseModel):
     asset: str = Field(pattern=r"^[0-9a-f]{40}$")
     board: Optional[str] = None
+    size: Optional[str] = None      # which resolution to enlarge to (4K / 6K ...); default the first one offered
 
 
 class BoardBody(BaseModel):
@@ -74,11 +75,21 @@ def resolve_size(settings: Settings, supported: list[str], size: str) -> Optiona
     return (size, None, "") if size in supported else None
 
 
+def upscale_options(settings: Settings) -> list[dict]:
+    """The enlarge steps the canvas button can offer: every resolution whose source is a ComfyUI enlarge."""
+    if not settings.comfy_url:
+        return []
+    out = []
+    for size in SIZE_ORDER:
+        spec = settings.resolutions.get(size) or {}
+        if spec.get("route") == "comfy" and size not in settings.disabled_sizes:
+            out.append({"size": size, "target": int(spec.get("target") or SIZE_TARGET[size]),
+                        "engine": str(spec.get("engine") or settings.comfy_engine)})
+    return out or [{"size": "4K", "target": SIZE_TARGET["4K"], "engine": settings.comfy_engine}]
+
+
 def upscale_info(settings: Settings) -> dict:
-    """What the "enlarge" button on the canvas does: the 4K entry's engine when that is a ComfyUI one."""
-    spec = settings.resolutions.get("4K") or {}
-    engine = str(spec.get("engine") or settings.comfy_engine) if spec.get("route") == "comfy" else settings.comfy_engine
-    return {"enabled": bool(settings.comfy_url), "label": "4K", "target": SIZE_TARGET["4K"], "engine": engine}
+    return {"enabled": bool(settings.comfy_url), "options": upscale_options(settings)}
 
 
 def allowed_catalog(settings: Settings, catalog: list[dict]) -> list[dict]:
@@ -388,14 +399,15 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
 
     @app.post("/api/upscale")
     async def upscale(body: UpscaleBody, user: str = user_dep):
-        info = upscale_info(settings)
-        if not info["enabled"]:
+        options = upscale_options(settings)
+        if not options:
             raise HTTPException(400, "服务器没有配置放大功能")
+        opt = next((o for o in options if o["size"] == (body.size or "").upper()), options[0])
         if not store.get_asset(body.asset):
             raise HTTPException(400, "图片不存在")
         ids = runner.submit(user=user, board=body.board, node=None, model="comfy:upscale", prompt="", refs=[body.asset],
-                            extra={"standalone": True, "upscale_to": info["target"], "engine": info["engine"]})
-        return {"jobs": ids, "label": info["label"]}
+                            extra={"standalone": True, "upscale_to": opt["target"], "engine": opt["engine"]})
+        return {"jobs": ids, "label": opt["size"]}
 
     @app.get("/api/jobs")
     async def get_jobs(ids: str, user: str = user_dep):

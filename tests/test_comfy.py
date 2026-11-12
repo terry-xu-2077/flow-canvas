@@ -101,5 +101,6 @@ def test_models_offer_comfy_sizes_and_jobs_carry_the_upscale(tmp_path):
         client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
         m = client.get("/api/models").json()
         assert m["models"][0]["sizes"] == ["1K", "2K", "4K", "6K"]
-        assert m["upscale"] == {"enabled": True, "label": "4K", "target": 4096, "engine": "seedvr2"}
+        assert m["upscale"] == {"enabled": True, "options": [
+            {"size": "4K", "target": 4096, "engine": "seedvr2"}, {"size": "6K", "target": 6144, "engine": "seedvr2"}]}
         assert client.post("/api/upscale", json={"asset": "0" * 40}).status_code == 400   # unknown image

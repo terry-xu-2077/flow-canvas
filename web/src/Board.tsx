@@ -5,7 +5,7 @@ import {
   type Connection, type Edge, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo } from './api'
+import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo, type UpscaleInfo, type UpscaleOption } from './api'
 import { CanvasContext } from './CanvasContext'
 import { copyAssetImage, imageFromHtml, recallCopied, rememberCopied } from './clipboard'
 import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
@@ -131,7 +131,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [maxCount, setMaxCount] = useState(4)
-  const [upscale, setUpscale] = useState<{ enabled: boolean; label: string; target: number }>({ enabled: false, label: '4K', target: 4096 })
+  const [upscale, setUpscale] = useState<UpscaleInfo>({ enabled: false, options: [] })
   const [modelError, setModelError] = useState('')
   const [name, setName] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -591,11 +591,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [boardId, patchNode, setNodes, setEdges])
 
   // ---- enlarge (ComfyUI): a placeholder next to the picture is filled in place when the job is done
-  const upscaleImage = useCallback(async (nodeId: string) => {
+  const upscaleImage = useCallback(async (nodeId: string, size: string) => {
     const src = nodesRef.current.find(n => n.id === nodeId) as ImageNodeType | undefined
     if (!src || src.data.pending || !src.data.assetId) return
     try {
-      const { jobs: [jobId] } = await api.upscale(src.data.assetId, boardId)
+      const { jobs: [jobId] } = await api.upscale(src.data.assetId, boardId, size)
       const width = src.width ?? IMAGE_WIDTH
       const height = Math.round((width * src.data.h) / src.data.w)
       const spot = findFree(nodesRef.current, src.position.x + width + 110, src.position.y, width, height + 40)
@@ -871,11 +871,16 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                     title="在右侧新建一张生成卡片，并把选中的图作为它的参考图（已连好线）">
               <BananaIcon />作为参考
             </button>
-            {selectedImages.length === 1 && upscale.enabled && (
-              <button onClick={() => void upscaleImage(selectedImages[0].id)} title={`用 ComfyUI 把这张图放大到 ${upscale.label}，结果放在右边的新图里`}>
-                放大到 {upscale.label}
-              </button>
-            )}
+            {selectedImages.length === 1 && upscale.enabled && (() => {
+              // the next step above the picture's current size (an image that is already 4K offers 6K, a 6K one nothing)
+              const d = (selectedImages[0] as ImageNodeType).data
+              const next: UpscaleOption | undefined = upscale.options.find(o => o.target > Math.max(d.w, d.h) * 1.02)
+              return next && (
+                <button onClick={() => void upscaleImage(selectedImages[0].id, next.size)} title={`用 ComfyUI 把这张图放大到 ${next.size}（长边 ${next.target} 像素），结果放在右边的新图里`}>
+                  放大到 {next.size}
+                </button>
+              )
+            })()}
             {selectedImages.length === 1 ? (
               <a className="btn" href={downloadUrl((selectedImages[0] as ImageNodeType).data.assetId)} title="下载原图">下载</a>
             ) : (
