@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .assets import AssetError, asset_path, save_image_bytes, thumbnail_path
-from .config import ROOT, Settings, load_settings
+from .config import SIZE_ORDER, ROOT, Settings, load_settings
 from .db import Store
 from .flow import FlowClient, FlowError, model_id
 from .jobs import JobRunner
@@ -45,18 +45,47 @@ class JobRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=8)
 
 
+class UpscaleBody(BaseModel):
+    asset: str = Field(pattern=r"^[0-9a-f]{40}$")
+    board: Optional[str] = None
+
+
 class BoardBody(BaseModel):
     name: Optional[str] = Field(default=None, max_length=80)
     data: Optional[dict] = None
 
 
+def resolve_size(settings: Settings, supported: list[str], size: str) -> Optional[tuple[str, Optional[int]]]:
+    """Where a resolution comes from: (size Flow generates, long edge to enlarge to with ComfyUI or None), or None if
+    this resolution is switched off / impossible for the model."""
+    size = (size or "1K").upper()
+    spec = settings.resolutions.get(size) or ({"route": "flow"} if size in supported else {"route": "off"})
+    if size in settings.disabled_sizes or spec.get("route") == "off":
+        return None
+    if spec.get("route") == "comfy":
+        base = str(spec.get("base") or "2K").upper()
+        if not settings.comfy_url:
+            return None
+        if base not in supported:
+            base = supported[0] if supported else ""
+        return (base, int(spec.get("target") or 4096)) if base else None
+    return (size, None) if size in supported else None
+
+
+def upscale_info(settings: Settings) -> dict:
+    """What the "enlarge" button on the canvas does (the 4K entry when it is a ComfyUI one, else a 4096 px default)."""
+    spec = settings.resolutions.get("4K") or {}
+    target = int(spec.get("target") or 4096) if spec.get("route") == "comfy" else 4096
+    return {"enabled": bool(settings.comfy_url), "label": f"{round(target / 1024)}K", "target": target}
+
+
 def allowed_catalog(settings: Settings, catalog: list[dict]) -> list[dict]:
-    """Drop the models and resolutions the admin switched off in config.json."""
+    """Drop the models and resolutions the admin switched off in config.json; add the ComfyUI-enlarged ones."""
     out = []
     for m in catalog:
         if m["key"] in settings.disabled_models:
             continue
-        sizes = [s for s in m["sizes"] if s not in settings.disabled_sizes]
+        sizes = [z for z in SIZE_ORDER if resolve_size(settings, m["sizes"], z)]
         if sizes:
             out.append({**m, "sizes": sizes})
     return out
@@ -106,7 +135,8 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     async def models(refresh: bool = False):
         try:
             catalog = await flow.models(refresh=refresh)
-            return {"models": allowed_catalog(settings, catalog), "max_count": settings.max_count}
+            return {"models": allowed_catalog(settings, catalog), "max_count": settings.max_count,
+                    "upscale": upscale_info(settings)}
         except (FlowError, httpx.HTTPError) as exc:
             raise HTTPException(502, f"无法读取模型列表：{exc}")
 
@@ -331,20 +361,39 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
     async def create_jobs(body: JobRequest, user: str = user_dep):
         if body.model in settings.disabled_models:
             raise HTTPException(400, "该模型已被管理员关闭")
-        if body.size.strip().upper() in settings.disabled_sizes:
-            raise HTTPException(400, f"{body.size} 分辨率已被管理员关闭")
         if body.count > settings.max_count:
             raise HTTPException(400, f"一次最多生成 {settings.max_count} 张")
         try:
-            mid = model_id(body.model, body.ratio, body.size)
+            catalog = await flow.models()
+        except (FlowError, httpx.HTTPError):
+            catalog = []
+        fam = next((m for m in catalog if m["key"] == body.model), None)
+        route = resolve_size(settings, fam["sizes"] if fam else ["1K"], body.size)
+        if not route:
+            raise HTTPException(400, f"{body.size} 分辨率已被管理员关闭或暂不可用")
+        flow_size, upscale_to = route
+        try:
+            mid = model_id(body.model, body.ratio, flow_size)
         except FlowError as exc:
             raise HTTPException(400, str(exc))
         for asset_id in body.refs:
             if not store.get_asset(asset_id):
                 raise HTTPException(400, "参考图不存在，请重新添加")
         ids = runner.submit(user=user, board=body.board, node=body.node, model=mid,
-                            prompt=body.prompt.strip(), refs=body.refs, count=body.count)
+                            prompt=body.prompt.strip(), refs=body.refs, count=body.count,
+                            extra={"upscale_to": upscale_to, "size": body.size.upper()} if upscale_to else None)
         return {"jobs": ids}
+
+    @app.post("/api/upscale")
+    async def upscale(body: UpscaleBody, user: str = user_dep):
+        info = upscale_info(settings)
+        if not info["enabled"]:
+            raise HTTPException(400, "服务器没有配置放大功能")
+        if not store.get_asset(body.asset):
+            raise HTTPException(400, "图片不存在")
+        ids = runner.submit(user=user, board=body.board, node=None, model="comfy:upscale", prompt="", refs=[body.asset],
+                            extra={"standalone": True, "upscale_to": info["target"]})
+        return {"jobs": ids, "label": info["label"]}
 
     @app.get("/api/jobs")
     async def get_jobs(ids: str, user: str = user_dep):

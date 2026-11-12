@@ -3,10 +3,23 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+SIZE_ORDER = ("1K", "2K", "4K", "6K")
+
+
+def default_resolutions() -> dict:
+    # route: flow = generated at that size by Flow; comfy = generated at `base` by Flow, then enlarged by ComfyUI to
+    # a long edge of `target` pixels; off = hidden.
+    return {
+        "1K": {"route": "flow"},
+        "2K": {"route": "flow"},
+        "4K": {"route": "comfy", "base": "2K", "target": 4096},
+        "6K": {"route": "comfy", "base": "2K", "target": 6144},
+    }
 
 
 @dataclass
@@ -25,6 +38,13 @@ class Settings:
     disabled_models: tuple = ()   # model family keys, e.g. "gemini-3.1-flash-lite-image"
     disabled_sizes: tuple = ()    # e.g. "4K"
     max_count: int = 4            # most images one card may ask for at once
+    # Local ComfyUI used for enlarging (and later other jobs). Empty url = not configured.
+    comfy_url: str = ""
+    comfy_engine: str = "seedvr2"     # which enlarge workflow: seedvr2 | pid
+    comfy_seedvr2: dict = field(default_factory=dict)
+    comfy_pid: dict = field(default_factory=dict)
+    comfy_timeout: float = 1800.0
+    resolutions: dict = field(default_factory=default_resolutions)
 
     @property
     def assets_dir(self) -> Path:
@@ -52,6 +72,18 @@ def load_settings(path: Path | None = None) -> Settings:
     s.disabled_sizes = tuple(str(x).strip().upper() for x in (raw.get("disabled_sizes") or []) if str(x).strip())
     if raw.get("max_count") is not None:
         s.max_count = max(1, min(8, int(raw["max_count"])))
+    cf = raw.get("comfyui") or {}
+    if str(cf.get("url") or "").strip():
+        s.comfy_url = str(cf["url"]).strip().rstrip("/")
+    if cf.get("upscale_engine"):
+        s.comfy_engine = str(cf["upscale_engine"]).strip()
+    s.comfy_seedvr2 = dict(cf.get("seedvr2") or {})
+    s.comfy_pid = dict(cf.get("pid") or {})
+    if cf.get("timeout") is not None:
+        s.comfy_timeout = float(cf["timeout"])
+    for size, spec in (raw.get("resolutions") or {}).items():
+        if str(size).upper() in SIZE_ORDER and isinstance(spec, dict):
+            s.resolutions[str(size).upper()] = {**s.resolutions.get(str(size).upper(), {}), **spec}
     if raw.get("data_dir"):
         d = Path(raw["data_dir"])
         s.data_dir = d if d.is_absolute() else ROOT / d

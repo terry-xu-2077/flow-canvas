@@ -131,6 +131,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [maxCount, setMaxCount] = useState(4)
+  const [upscale, setUpscale] = useState<{ enabled: boolean; label: string; target: number }>({ enabled: false, label: '4K', target: 4096 })
   const [modelError, setModelError] = useState('')
   const [name, setName] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -159,7 +160,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   // ---- load board + models
   const loadModels = useCallback(() => {
-    api.models().then(r => { setModels(r.models); setMaxCount(r.max_count); setModelError('') })
+    api.models().then(r => { setModels(r.models); setMaxCount(r.max_count); if (r.upscale) setUpscale(r.upscale); setModelError('') })
       .catch(e => setModelError(String(e.message || e)))
   }, [])
   useEffect(() => { loadModels() }, [loadModels])
@@ -589,6 +590,43 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
   }, [boardId, patchNode, setNodes, setEdges])
 
+  // ---- enlarge (ComfyUI): a placeholder next to the picture is filled in place when the job is done
+  const upscaleImage = useCallback(async (nodeId: string) => {
+    const src = nodesRef.current.find(n => n.id === nodeId) as ImageNodeType | undefined
+    if (!src || src.data.pending || !src.data.assetId) return
+    try {
+      const { jobs: [jobId] } = await api.upscale(src.data.assetId, boardId)
+      const width = src.width ?? IMAGE_WIDTH
+      const height = Math.round((width * src.data.h) / src.data.w)
+      const spot = findFree(nodesRef.current, src.position.x + width + 110, src.position.y, width, height + 40)
+      const ph: ImageNodeType = {
+        id: `img_${jobId}`, type: 'image', position: spot, width, height,
+        data: { assetId: '', w: src.data.w, h: src.data.h, prompt: src.data.prompt, pending: true, jobId, status: 'queued', progress: '放大排队中…' },
+      }
+      setNodes(ns => [...ns, ph])
+      setEdges(es => [...es, { ...edgeBase, id: `out_${jobId}`, source: src.id, target: ph.id, className: 'out' } as Edge])
+    } catch (e) {
+      showToast(`放大失败：${(e as Error).message}`)
+    }
+  }, [boardId, setNodes, setEdges, showToast])
+
+  /** Progress of enlarge jobs, which belong to a placeholder image instead of a generation card. */
+  const applyUpscaleUpdates = useCallback((updates: JobInfo[]) => {
+    const gone = new Set<string>()
+    setNodes(ns => ns.map(n => {
+      const info = updates.find(u => `img_${u.id}` === n.id)
+      if (!info || n.type !== 'image') return n
+      if (info.status === 'cancelled') { gone.add(n.id); return n }
+      const d = (n as ImageNodeType).data
+      if (info.status === 'done' && info.result_asset) {
+        const w = info.result_w || d.w, h = info.result_h || d.h
+        return { ...n, height: Math.round(((n.width ?? IMAGE_WIDTH) * h) / w), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
+      }
+      return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
+    }).filter(n => !gone.has(n.id)))
+    if (gone.size) setEdges(es => es.filter(e => !gone.has(e.target)))
+  }, [setNodes, setEdges])
+
   const cancelJobs = useCallback((genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
     node?.data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
@@ -649,11 +687,18 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   useEffect(() => {
     if (!loaded) return
     const tick = async () => {
-      const pending = nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : []))
-        .filter(j => !FINAL.has(j.status)).map(j => j.id)
+      const upIds = nodesRef.current.flatMap(n => (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId
+        && !nodesRef.current.some(g => g.type === 'gen' && (g as GenNodeType).data.jobs.some(j => j.id === (n as ImageNodeType).data.jobId))
+        ? [(n as ImageNodeType).data.jobId as string] : []))
+      const pending = [...nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : []))
+        .filter(j => !FINAL.has(j.status)).map(j => j.id), ...upIds]
       if (!pending.length) return
       try {
-        const updates = await api.jobs(pending.slice(0, 64))
+        const all = await api.jobs(pending.slice(0, 64))
+        const mine = new Set(upIds)
+        const upUpdates = all.filter(u => mine.has(u.id))
+        if (upUpdates.length) applyUpscaleUpdates(upUpdates)
+        const updates = all.filter(u => !mine.has(u.id))
         const changed = updates.filter(u => {
           const cur = nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : [])).find(j => j.id === u.id)
           return cur && (cur.status !== u.status || cur.progress !== u.progress || u.status === 'done')
@@ -663,7 +708,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
     const t = setInterval(tick, 1500)
     return () => clearInterval(t)
-  }, [loaded, applyJobUpdates])
+  }, [loaded, applyJobUpdates, applyUpscaleUpdates])
 
   // ---- canvas wiring
   const isValidConnection = useCallback((c: Connection | Edge) => {
@@ -826,6 +871,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                     title="在右侧新建一张生成卡片，并把选中的图作为它的参考图（已连好线）">
               <BananaIcon />作为参考
             </button>
+            {selectedImages.length === 1 && upscale.enabled && (
+              <button onClick={() => void upscaleImage(selectedImages[0].id)} title={`用 ComfyUI 把这张图放大到 ${upscale.label}，结果放在右边的新图里`}>
+                放大到 {upscale.label}
+              </button>
+            )}
             {selectedImages.length === 1 ? (
               <a className="btn" href={downloadUrl((selectedImages[0] as ImageNodeType).data.assetId)} title="下载原图">下载</a>
             ) : (

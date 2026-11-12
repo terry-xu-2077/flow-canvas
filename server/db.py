@@ -42,6 +42,7 @@ class Store:
             self._db.executescript(SCHEMA)
             self._db.commit()
         self._migrate_users()
+        self._migrate_jobs()
 
     # -- helpers
     def _one(self, sql: str, args: tuple = ()) -> Optional[dict]:
@@ -58,6 +59,13 @@ class Store:
             cur = self._db.execute(sql, args)
             self._db.commit()
             return cur.rowcount
+
+    def _migrate_jobs(self) -> None:
+        with self._lock:
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(jobs)")}
+            if "extra" not in cols:
+                self._db.execute("ALTER TABLE jobs ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
+                self._db.commit()
 
     # -- boards
     # -- users (id is a random uuid; boards.user / jobs.user hold that id, the name can change)
@@ -148,10 +156,10 @@ class Store:
     # -- jobs
     def create_job(self, job: dict[str, Any]) -> None:
         self._run(
-            "INSERT INTO jobs (id,user,board,node,model,prompt,refs,status,progress,created)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO jobs (id,user,board,node,model,prompt,refs,status,progress,created,extra)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (job["id"], job["user"], job.get("board"), job.get("node"), job["model"], job["prompt"],
-             json.dumps(job.get("refs") or []), "queued", "", time.time()))
+             json.dumps(job.get("refs") or []), "queued", "", time.time(), json.dumps(job.get("extra") or {})))
 
     def update_job(self, job_id: str, **fields: Any) -> None:
         if not fields:
@@ -163,6 +171,7 @@ class Store:
         row = self._one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if row:
             row["refs"] = json.loads(row["refs"] or "[]")
+            row["extra"] = json.loads(row.get("extra") or "{}")
         return row
 
     def get_jobs(self, ids: list[str]) -> list[dict]:
@@ -172,6 +181,7 @@ class Store:
         rows = self._all(f"SELECT * FROM jobs WHERE id IN ({marks})", tuple(ids))
         for row in rows:
             row["refs"] = json.loads(row["refs"] or "[]")
+            row["extra"] = json.loads(row.get("extra") or "{}")
         return rows
 
     def fail_unfinished_jobs(self, message: str) -> int:

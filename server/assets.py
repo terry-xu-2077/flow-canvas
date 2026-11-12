@@ -21,11 +21,11 @@ def asset_path(settings: Settings, asset_id: str) -> Path:
     return settings.assets_dir / asset_id
 
 
-def save_image_bytes(settings: Settings, store: Store, data: bytes) -> dict:
+def save_image_bytes(settings: Settings, store: Store, data: bytes, *, limit: bool = True) -> dict:
     """Validate and store an image; identical bytes map to the same asset id."""
     if not data:
         raise AssetError("空文件")
-    if len(data) > settings.max_upload_bytes:
+    if limit and len(data) > settings.max_upload_bytes:  # uploads are capped; results we make ourselves are not
         raise AssetError("图片太大")
     try:
         with Image.open(io.BytesIO(data)) as img:

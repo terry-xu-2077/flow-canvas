@@ -47,9 +47,20 @@ start.bat                               # 默认 http://<本机IP>:8870
 ```
 
 - `disabled_models`：按模型系列 key 关闭模型（key 见 `/api/models`），界面里不再显示，接口也会拒绝。
-- `disabled_sizes`：关闭分辨率（`"1K"` / `"2K"` / `"4K"`）。
+- `disabled_sizes`：关闭分辨率（`"1K"` / `"2K"` / `"4K"` / `"6K"`）。也可以在控制台“设置”里把某个分辨率的来源设为“关闭”。
 - `max_count`：一张卡片一次最多生成几张（1–8，默认 4）。
 - 改完重启服务生效；画板里已经选了被关闭选项的卡片，打开时会自动改成可用的值。
+
+## ComfyUI 放大（可选）
+
+在控制台点“设置”：填 ComfyUI 地址、选放大方案（SeedVR2 或 PiD），并为 1K / 2K / 4K / 6K 各选来源。选“ComfyUI 放大”的分辨率，由 Flow 先按“基础尺寸”出图，再放大到“目标长边”像素。画板里选中一张图，选择栏会出现“放大到 4K”，结果放在右边的新图里。放大模型文件名等高级项在 config.json 的 `comfyui` 里（`seedvr2` / `pid`）。保存设置立即生效。
+
+```json
+{
+  "comfyui": {"url": "http://127.0.0.1:8188", "upscale_engine": "seedvr2"},
+  "resolutions": {"4K": {"route": "comfy", "base": "2K", "target": 4096}}
+}
+```
 
 ## 开发
 
