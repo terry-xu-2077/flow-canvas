@@ -542,11 +542,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         prompt, refs, count: node.data.count,
       })
       const [rw, rh] = ratioSize(node.data.ratio)
-      const stacked = edgesRef.current.filter(e => e.source === genId && e.className === 'out').length
       const placeholders: ImageNodeType[] = []
       ids.forEach((jobId, i) => {
         const spot = findFree([...nodesRef.current, ...placeholders], node.position.x + (node.width ?? GEN_WIDTH) + 110,
-          node.position.y + (stacked + i) * (resultHeight(rw, rh) + 90), RESULT_WIDTH, resultHeight(rw, rh) + 40)
+          node.position.y, RESULT_WIDTH, resultHeight(rw, rh) + 40)
         placeholders.push({
           id: `img_${jobId}`, type: 'image', position: spot, width: RESULT_WIDTH, height: resultHeight(rw, rh),
           data: { assetId: '', w: rw, h: rh, prompt: node.data.prompt, pending: true, jobId, status: 'queued', progress: '' },
@@ -604,10 +603,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         handled = [...handled, info.id]
         if (![...next, ...added].some(n => n.id === imgId)) {
           const w = info.result_w || 1024, h = info.result_h || 1024
-          const k = handled.length - 1
-          // stack results in one column to the right of the card so edges stay readable
+          // results go to the first free spot in a column right of the card (earlier results that were moved away leave room)
           const spot = findFree([...next, ...added], gen.position.x + GEN_WIDTH + 110,
-            gen.position.y + k * (resultHeight(w, h) + 70), RESULT_WIDTH, resultHeight(w, h) + 40)
+            gen.position.y, RESULT_WIDTH, resultHeight(w, h) + 40)
           added.push({
             id: imgId, type: 'image', position: spot, width: RESULT_WIDTH, height: resultHeight(w, h),
             data: { assetId: info.result_asset, w, h, prompt: gen.data.prompt },
