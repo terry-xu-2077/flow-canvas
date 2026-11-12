@@ -124,7 +124,7 @@ export default function App() {
   const [user, setUserState] = useState(getUser())
   const [boardId, openBoard] = useHashBoard()
   // a stored login that the server no longer knows (or an old name-based one) is resolved or dropped here
-  useEffect(() => { if (user) api.me().then(u => setUser(u.id)).catch(() => { clearUser(); setUserState('') }) }, [user])
+  useEffect(() => { if (user) api.me().then(u => setUser(u.id)).catch(e => { if ((e as { status?: number }).status === 401) { clearUser(); setUserState('') } }) }, [user])
   if (!user) return <Login onDone={() => setUserState(getUser())} />
   if (boardId) return <Board key={boardId} boardId={boardId} onBack={() => openBoard(null)} />
   return <BoardList onOpen={openBoard} onLogout={() => { clearUser(); setUserState('') }} />
