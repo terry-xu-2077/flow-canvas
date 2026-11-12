@@ -505,3 +505,4 @@ button, select, input { border-radius: var(--r-ctl); }
 .login h1 .brand { width: 85px; height: 85px; }
 .login h1 { margin-bottom: 0; }
 .login .tagline { margin-top: 4px; }
+.login .tagline { margin-bottom: 50px; } /* 16px + one user-chip height (34px) of extra space before the user list */
