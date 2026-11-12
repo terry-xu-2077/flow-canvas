@@ -681,11 +681,26 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const el = document.elementFromPoint(pt.clientX, pt.clientY)?.closest('.react-flow__node')
     const otherId = el?.getAttribute('data-id')
     if (!otherId || otherId === state.fromNode.id) return
+    // An image line released on a collection moves the picture into a slot (the one under the pointer when it is
+    // empty, else the first empty one, else a new slot); the image's own incoming line is cut.
+    const from = nodesRef.current.find(n => n.id === state.fromNode!.id)
+    const to = nodesRef.current.find(n => n.id === otherId)
+    if (state.fromHandle.type === 'source' && from?.type === 'image' && to?.type === 'refset' && from.data.assetId && !from.data.pending) {
+      const { assetId, w, h } = from.data
+      const hit = document.elementFromPoint(pt.clientX, pt.clientY)?.closest('.rs-slot')?.getAttribute('data-slot')
+      editSlots(to.id, ss => {
+        const target = ss.find(s => s.id === hit && !s.assetId) ?? ss.find(s => !s.assetId)
+        const fill = { assetId, w, h }
+        return target ? ss.map(s => (s.id === target.id ? { ...s, ...fill } : s)) : [...ss, { id: uid('s'), ...fill }]
+      })
+      setEdges(es => es.filter(e => e.target !== from.id))
+      return
+    }
     const c: Connection = state.fromHandle.type === 'target'
       ? { source: otherId, target: state.fromNode.id, sourceHandle: null, targetHandle: null }
       : { source: state.fromNode.id, target: otherId, sourceHandle: null, targetHandle: null }
     if (isValidConnection(c)) onConnect(c)
-  }, [isValidConnection, onConnect])
+  }, [isValidConnection, onConnect, editSlots, setEdges])
 
   const refsOf = useCallback((genId: string) => {
     const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined

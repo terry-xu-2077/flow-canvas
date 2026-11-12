@@ -116,7 +116,7 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
             {slots.map((slot, idx) => {
               return (
                 <div
-                  key={slot.id} draggable={!!slot.assetId}
+                  key={slot.id} data-slot={slot.id} draggable={!!slot.assetId}
                   className={`rs-slot nodrag${slot.assetId ? '' : ' rs-empty'}${overSlot === slot.id ? ' over' : ''}`}
                   onDragStart={e => { dragId.current = slot.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-slot', slot.id) }}
                   onDragEnd={() => { dragId.current = null; setOverSlot(null) }}
