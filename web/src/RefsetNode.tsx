@@ -133,6 +133,12 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
                             onClick={() => { pickFor.current = slot.id; fileInput.current?.click() }}>＋</button>
                   )}
                   <div className="rs-cap" title={slot.name}>{slot.assetId ? (slot.name ?? `${slot.w} × ${slot.h}`) : '点击添加'}</div>
+                  {slot.assetId && (
+                    <button className="rs-zoom icon" title="放大查看" onClick={() => canvas.preview(slot.assetId!)}>
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9.2 6.8M2.5 13.5l4.3-4.3" /></svg>
+                    </button>
+                  )}
                   <button className="rs-x icon" title={slot.assetId ? '清空图片（保留槽位）' : '移除空槽位'} onClick={() => remove(slot)}>✕</button>
                 </div>
               )

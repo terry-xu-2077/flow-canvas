@@ -454,3 +454,12 @@ button, select, input { border-radius: var(--r-ctl); }
   background: linear-gradient(transparent, #000000a8); pointer-events: none; }
 .rs-slot.rs-empty .rs-cap { background: none; color: var(--muted); text-align: center; padding: 0 10px 12px; }
 .rs-slot .rs-x { z-index: 3; top: 8px; right: 8px; }
+
+/* enlarge button (diagonal brackets) at the top-right of a filled slot; the clear ✕ moves left of it */
+.rs-slot .rs-zoom { position: absolute; top: 8px; right: 8px; z-index: 3; width: 26px; height: 26px; padding: 0; display: grid; place-items: center;
+  opacity: 0; transition: opacity .12s; background: #0c0e12b8; color: #e6ebf1; border: 0; border-radius: 8px; cursor: pointer; backdrop-filter: blur(4px); }
+.rs-slot:hover .rs-zoom { opacity: 1; }
+.rs-slot .rs-zoom:hover { background: #0c0e12e6; }
+.rs-slot:not(.rs-empty) .rs-x { right: 40px; width: 26px; height: 26px; padding: 0; }
+.rs-slot:not(.rs-empty) .rs-x { display: grid; place-items: center; background: #0c0e12b8; color: #e6ebf1; border: 0; border-radius: 8px; backdrop-filter: blur(4px); }
+.rs-slot:not(.rs-empty) .rs-x:hover { background: #0c0e12e6; }
