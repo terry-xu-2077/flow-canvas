@@ -404,9 +404,15 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         options = upscale_options(settings)
         if not options:
             raise HTTPException(400, "服务器没有配置放大功能")
-        opt = next((o for o in options if o["size"] == (body.size or "").upper()), options[0])
-        if not store.get_asset(body.asset):
+        asset = store.get_asset(body.asset)
+        if not asset:
             raise HTTPException(400, "图片不存在")
+        # the asked size when it really is bigger than the picture, otherwise the next step above it
+        long_edge = max(asset.get("w") or 0, asset.get("h") or 0)
+        bigger = [o for o in options if o["target"] > long_edge * 1.02]
+        if not bigger:
+            raise HTTPException(400, f"这张图已经有 {long_edge} 像素，没有更大的放大档位了")
+        opt = next((o for o in bigger if o["size"] == (body.size or "").upper()), bigger[0])
         ids = runner.submit(user=user, board=body.board, node=None, model="comfy:upscale", prompt="", refs=[body.asset],
                             extra={"standalone": True, "upscale_to": opt["target"], "engine": opt["engine"], "size": opt["size"]})
         return {"jobs": ids, "label": opt["size"]}
