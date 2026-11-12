@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from typing import Optional
@@ -103,7 +104,7 @@ class JobRunner:
         client = self.comfy_client()
 
         size = job["extra"].get("size") or next((z for z in SIZE_ORDER if SIZE_TARGET[z] == target), f"{target}px")
-        tag = f"放大到 {size}"
+        tag = f"放大到 {size}" if job["extra"].get("standalone") else f"第 2 步 · 放大到 {size}"
 
         async def on_progress(text: str) -> None:
             await self._progress(job_id, f"{tag} · {text}")
@@ -139,11 +140,15 @@ class JobRunner:
                 self.store.set_flow_ref(asset_id, ref)
             ref_ids.append(ref)
 
+        # a 4K / 6K card is two steps: Flow makes a smaller picture (its own 2K stage also says "放大到 2K"), ComfyUI enlarges it
+        m = re.search(r"-(2k|4k)$", job["model"])
+        step = f"第 1 步 · Flow 出图 {m.group(1).upper() if m else '1K'} · " if extra.get("upscale_to") else ""
+
         async def on_progress(text: str) -> None:
-            await self._progress(job_id, text)
+            await self._progress(job_id, step + text)
 
         url = await self.flow.generate(job["model"], mentions_to_text(job["prompt"], len(ref_ids)), ref_ids, on_progress)
-        await self._progress(job_id, "下载结果…")
+        await self._progress(job_id, step + "下载结果…")
         data = await self.flow.download(url)
         if extra.get("upscale_to"):
             data = await self._upscale(job, data, False)
