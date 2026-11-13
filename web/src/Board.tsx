@@ -19,7 +19,7 @@ import {
 } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
-const GEN_EST_HEIGHT = 330
+const GEN_EST_HEIGHT = 290
 const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
 // images made by a generation card are larger than the default image size (about the size users resized them to)
@@ -675,7 +675,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         if (![...next, ...added].some(n => n.id === imgId)) {
           const w = info.result_w || 1024, h = info.result_h || 1024
           // results go to the first free spot in a column right of the card (earlier results that were moved away leave room)
-          const spot = findFree([...next, ...added], gen.position.x + GEN_WIDTH + 110,
+          const spot = findFree([...next, ...added], gen.position.x + (gen.width ?? GEN_WIDTH) + 110,
             gen.position.y, resultWidth(w, h), resultHeight(w, h, resultWidth(w, h)) + 40)
           added.push({
             id: imgId, type: 'image', position: spot, width: resultWidth(w, h), height: resultHeight(w, h, resultWidth(w, h)),

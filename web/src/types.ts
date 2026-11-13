@@ -47,8 +47,8 @@ export type ImageNodeType = Node<ImageData, 'image'>
 export type RefsetNodeType = Node<RefsetData, 'refset'>
 export type CanvasNode = GenNodeType | ImageNodeType | RefsetNodeType
 
-export const GEN_WIDTH = 340
-export const GEN_HEIGHT = 300
+export const GEN_WIDTH = 480
+export const GEN_HEIGHT = 280
 export const IMAGE_WIDTH = 280
 export const REFSET_WIDTH = 420
 
