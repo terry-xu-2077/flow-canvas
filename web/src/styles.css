@@ -532,3 +532,6 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 .pop-toggle .box { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #556070; display: grid; place-items: center; font-size: 12px; line-height: 1; }
 .pop-toggle.on { border-color: var(--accent, #b6f23a); }
 .pop-toggle.on .box { background: var(--accent, #b6f23a); border-color: var(--accent, #b6f23a); color: #11161c; }
+
+.copy-btn { opacity: 0; font-size: 15px; line-height: 1; padding: 2px 6px; }
+.card.gen:hover .copy-btn, .card.gen.selected .copy-btn { opacity: 1; }

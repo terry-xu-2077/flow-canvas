@@ -60,6 +60,7 @@ export interface CanvasActions {
   dissolve: (id: string) => void
   generate: (id: string) => void
   cancelJobs: (id: string) => void
+  duplicate: (id: string) => void
   continueFrom: (imageIds: string[]) => void
   preview: (assetId: string) => void
   refCount: (genId: string) => number

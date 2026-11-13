@@ -86,6 +86,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
         <span className="node-title"><BananaIcon className="ico-banana" />生成卡片{refs > 0 ? ` · 参考图 ${refs}${data.onlyRefs ? ` · 发送 ${sentCount}` : ''}` : ''}</span>
+        <button className="icon nodrag copy-btn" title="复制卡片（Ctrl+D；按住 Alt 拖动卡片也可复制），保留参考引用线" onClick={() => canvas.duplicate(id)}>⧉</button>
       </div>
       <PromptEditor
         value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}

@@ -396,6 +396,50 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }))
   }, [setNodes, setEdges])
 
+  // Copy generation cards: same settings and prompt, no results, and the same reference lines (the new card is
+  // wired to the same images/collections, with the same <Picture N> numbering). `at` gives the new positions;
+  // without it the copy goes into free space next to the original.
+  const cloneGens = useCallback((ids: string[], at?: Record<string, { x: number; y: number }>) => {
+    const src = nodesRef.current.filter((n): n is GenNodeType => n.type === 'gen' && ids.includes(n.id))
+    if (!src.length) return
+    const placed: CanvasNode[] = []
+    const copies: GenNodeType[] = []
+    const edges: Edge[] = []
+    for (const o of src) {
+      const b = nodeBox(o)
+      const pos = at?.[o.id] ?? findFree([...nodesRef.current, ...placed], o.position.x + b.w + 40, o.position.y, b.w, b.h)
+      const { prompt, model, ratio, size, count, refIds, onlyRefs } = o.data
+      const copy: GenNodeType = {
+        id: uid('g'), type: 'gen', position: pos, width: o.width ?? b.w, height: o.height ?? b.h, selected: true,
+        data: { prompt, model, ratio, size, count, jobs: [], handled: [], refIds: refIds ? [...refIds] : undefined, onlyRefs },
+      }
+      placed.push(copy)
+      copies.push(copy)
+      for (const e of edgesRef.current) {
+        if (e.target === o.id && e.className !== 'out') edges.push({ ...edgeBase, id: uid('e'), source: e.source, target: copy.id } as Edge)
+      }
+    }
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), ...copies] as CanvasNode[])
+    setEdges(es => [...es, ...edges])
+  }, [setNodes, setEdges])
+
+  // Alt + drag a generation card: the card stays where it was and the copy lands where it is dropped.
+  const altStart = useRef<Record<string, { x: number; y: number }> | null>(null)
+  const onNodeDragStart = useCallback((e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
+    const gens = dragged.filter(n => n.type === 'gen')
+    altStart.current = (e as MouseEvent).altKey && gens.length ? Object.fromEntries(gens.map(n => [n.id, { ...n.position }])) : null
+  }, [])
+  const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
+    const start = altStart.current
+    altStart.current = null
+    if (!start) return
+    const at: Record<string, { x: number; y: number }> = {}
+    for (const n of dragged) if (start[n.id]) at[n.id] = { ...n.position }
+    if (!Object.keys(at).some(id => at[id].x !== start[id].x || at[id].y !== start[id].y)) return
+    setNodes(ns => ns.map(n => (start[n.id] ? { ...n, position: start[n.id] } : n)) as CanvasNode[])
+    cloneGens(Object.keys(at), at)
+  }, [setNodes, cloneGens])
+
   const addGenCard = useCallback(() => {
     const el = document.querySelector('.react-flow')?.getBoundingClientRect()
     const center = rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 2 })
@@ -517,6 +561,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (['TEXTAREA', 'INPUT', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd') {
+        const ids = nodesRef.current.filter(n => n.selected && n.type === 'gen').map(n => n.id)
+        if (ids.length) { e.preventDefault(); cloneGens(ids) }
+        return
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key.toLowerCase()
       if (k === 'escape') { setPreviewId(null); setDropMenu(null); return }
@@ -529,7 +578,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [addGenCard, addRefset, fitAll, previewId])
+  }, [addGenCard, addRefset, fitAll, previewId, cloneGens])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[]) => {
@@ -756,6 +805,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     if (isValidConnection(c)) onConnect(c)
   }, [isValidConnection, onConnect, editSlots, setEdges])
 
+  const duplicate = useCallback((id: string) => cloneGens([id]), [cloneGens])
   const refsOf = useCallback((genId: string) => {
     const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
     return numberedRefs(gen?.data.refIds, collectRefs(genId, nodes, edges))
@@ -763,8 +813,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const refCount = useCallback((genId: string) => collectRefs(genId, nodes, edges).length, [nodes, edges])
 
   const actions = useMemo<CanvasActions>(() => ({
-    models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, preview: setPreviewId, refCount, refsOf,
-  }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, continueFrom, refCount, refsOf])
+    models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, duplicate, continueFrom, preview: setPreviewId, refCount, refsOf,
+  }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, duplicate, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image' && !(n as ImageNodeType).data.pending)
   const viewport = useViewport()
@@ -798,6 +848,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         <ReactFlow
           nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
+          onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop}
           onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
           minZoom={0.1} maxZoom={2} selectionOnDrag selectionMode={SelectionMode.Partial} panOnDrag={[1, 2]} panActivationKeyCode="Space"
