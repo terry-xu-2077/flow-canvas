@@ -31,7 +31,7 @@ python -m venv venv
 venv\Scripts\pip install -r requirements.txt
 copy config.example.json config.json   # 填 flow2api 地址和 API Key
 cd web && npm install && npm run build  # 生成 web/dist
-start.bat                               # 默认 http://<本机IP>:8870
+TerryFlow.bat                           # 一键：拉取更新 → 检查/部署环境 → 启动控制台；默认 http://<本机IP>:8870
 ```
 
 画板、图片、任务记录保存在 `data/`（`canvas.db` 和 `assets/`）。

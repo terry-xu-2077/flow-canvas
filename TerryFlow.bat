@@ -1,11 +1,24 @@
 @echo off
 cd /d "%~dp0"
-title Flow Canvas
-set "PYTHONUNBUFFERED=1"
+title Terry Flow - update, check environment, start
+set "PYTHONUTF8=1"
 
-REM ---------- first-run setup (safe to re-run; each step is skipped when already done) ----------
+REM ================= 1/3  pull updates (skipped quietly when git is not available) =================
+echo [1/3] Checking for updates ...
+where git >nul 2>&1
+if errorlevel 1 goto noGit
+if not exist ".git" goto noGit
+git -c safe.directory="%CD%" pull --ff-only
+if errorlevel 1 echo [warn] Update failed ^(network, local changes, or git access^). Continuing with the current version.
+goto envCheck
+:noGit
+echo [skip] git was not found or this is not a git checkout.
+
+REM ================= 2/3  deploy / check the environment (every step is skipped when already done) =================
+:envCheck
+echo [2/3] Checking the environment ...
 if not exist "venv\Scripts\python.exe" (
-    echo [setup] creating Python virtual environment in venv ...
+    echo [setup] creating the Python virtual environment in venv ...
     where py >nul 2>&1
     if not errorlevel 1 (
         py -3 -m venv venv
@@ -17,21 +30,13 @@ if not exist "venv\Scripts\python.exe" (
         pause
         exit /b 1
     )
-    echo [setup] installing Python packages ...
-    "venv\Scripts\python.exe" -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo [error] pip install failed. Check the network, then run this again.
-        rmdir /s /q venv
-        pause
-        exit /b 1
-    )
 )
 
-REM packages added by later versions: install whatever the existing venv is missing
+REM install whatever packages the venv is missing (new versions may add some)
 "venv\Scripts\python.exe" -c "import fastapi,uvicorn,httpx,PIL,customtkinter" >nul 2>&1
 if errorlevel 1 (
-    echo [setup] installing missing Python packages ...
-    "venv\Scripts\python.exe" -m pip install -r requirements.txt
+    echo [setup] installing Python packages ...
+    "venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
     if errorlevel 1 (
         echo [error] pip install failed. Check the network, then run this again.
         pause
@@ -66,6 +71,8 @@ if not exist "web\dist\index.html" (
     )
 )
 
-REM ---------- run: the console window starts the web service; no black window stays open ----------
+REM ================= 3/3  start the console (no black window stays open) =================
+echo [3/3] Starting Terry Flow ...
 start "" "venv\Scripts\pythonw.exe" "TerryFlow.pyw"
+timeout /t 2 /nobreak >nul
 exit /b 0

@@ -1,4 +1,4 @@
-r"""Starts the Terry Flow console without a black console window (double-click, or started by start.bat).
+r"""Starts the Terry Flow console without a black console window (double-click, or started by TerryFlow.bat).
 
 Always runs inside the project's venv: when launched by the system Python (double-click on a .pyw) it hands over to
 venv\Scripts\pythonw.exe. Crashes are written to logs\console_crash.log because there is no window to show them.

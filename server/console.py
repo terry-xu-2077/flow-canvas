@@ -1,6 +1,6 @@
 """Desktop control panel: runs the web service in-process and shows usage, server state, users, running tasks and the log.
 
-    python -m server.console        (start.bat does this)
+    python -m server.console        (TerryFlow.bat / TerryFlow.pyw start it)
     python -m server.main           (headless, plain uvicorn log)
 """
 from __future__ import annotations
