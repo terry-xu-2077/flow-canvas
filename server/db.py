@@ -161,6 +161,20 @@ class Store:
             (job["id"], job["user"], job.get("board"), job.get("node"), job["model"], job["prompt"],
              json.dumps(job.get("refs") or []), "queued", "", time.time(), json.dumps(job.get("extra") or {})))
 
+    def merge_extra(self, job_id: str, patch: dict) -> None:
+        with self._lock:
+            row = self._db.execute("SELECT extra FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                return
+            cur = json.loads(row[0] or "{}")
+            cur.update(patch)
+            self._db.execute("UPDATE jobs SET extra=? WHERE id=?", (json.dumps(cur), job_id))
+            self._db.commit()
+
+    def recent_done(self, limit: int = 80) -> list[dict]:
+        return self._all("SELECT extra, started, finished FROM jobs WHERE status='done' AND started IS NOT NULL "
+                         "ORDER BY finished DESC LIMIT ?", (limit,))
+
     def update_job(self, job_id: str, **fields: Any) -> None:
         if not fields:
             return

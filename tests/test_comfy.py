@@ -105,3 +105,15 @@ def test_models_offer_comfy_sizes_and_jobs_carry_the_upscale(tmp_path):
         assert m["upscale"] == {"enabled": True, "options": [
             {"size": "4K", "target": 4096, "engine": "seedvr2"}, {"size": "6K", "target": 6144, "engine": "seedvr2"}]}
         assert client.post("/api/upscale", json={"asset": "0" * 40}).status_code == 400   # unknown image
+
+
+def test_job_percent_spans_both_steps():
+    from server.jobs import job_percent
+    base = {"status": "running", "started": 1000.0, "extra": {"upscale_to": 4096, "est_flow": 40, "est_up": 60}}
+    assert job_percent({**base, "status": "queued"}, 1010.0) == 0
+    assert job_percent(base, 1020.0) == 20                      # half of the Flow step = 20 % of the whole (40 % weight)
+    done_flow = {**base, "extra": {**base["extra"], "flow_done": 1040.0}}
+    assert job_percent(done_flow, 1100.0) == 40                 # waiting for ComfyUI keeps the Flow share
+    run_up = {**base, "extra": {**base["extra"], "flow_done": 1040.0, "up_start": 1040.0}}
+    assert 69 <= job_percent(run_up, 1070.0) <= 71              # half of the enlarge step: 40 + 30
+    assert job_percent(run_up, 9999.0) == 99                    # never claims 100 % before it is done

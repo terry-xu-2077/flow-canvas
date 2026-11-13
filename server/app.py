@@ -5,6 +5,7 @@ import io
 import json
 import re
 import sqlite3
+import time
 import uuid
 import zipfile
 from urllib.parse import quote
@@ -22,7 +23,7 @@ from .assets import AssetError, asset_path, save_image_bytes, thumbnail_path
 from .config import SIZE_ORDER, SIZE_TARGET, ROOT, Settings, load_settings
 from .db import Store
 from .flow import FlowClient, FlowError, model_id
-from .jobs import JobRunner
+from .jobs import JobRunner, job_percent
 
 USER_RE = re.compile(r"^[\w一-鿿\- ]{1,32}$")
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -424,6 +425,9 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         out = []
         for j in rows:
             item = {k: j[k] for k in ("id", "node", "status", "progress", "error", "result_asset", "model")}
+            pct = job_percent(j, time.time())
+            if pct > 0:
+                item["progress"] = f"{pct}%"
             asset = store.get_asset(j["result_asset"]) if j["result_asset"] else None
             item["result_w"], item["result_h"] = (asset["w"], asset["h"]) if asset else (None, None)
             out.append(item)

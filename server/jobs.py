@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import statistics
 import time
 import uuid
 from typing import Optional
@@ -22,6 +24,29 @@ from .flow import FlowClient, FlowError, mentions_to_text
 FINAL = {"done", "failed", "cancelled"}
 
 
+def job_percent(job: dict, now: float) -> int:
+    """Progress guess for a running job: elapsed time against how long the Flow step and the ComfyUI enlarge step took
+    for earlier jobs (the real step times are not reported by either service)."""
+    ex = job.get("extra") or {}
+    if job.get("status") != "running" or not job.get("started"):
+        return 0
+    est_f, est_u = float(ex.get("est_flow") or 45), float(ex.get("est_up") or 90)
+
+    def frac(elapsed: float, est: float) -> float:
+        return min(0.97, max(0.0, elapsed / est))
+
+    if ex.get("standalone"):
+        return int(frac(now - ex["up_start"], est_u) * 99) if ex.get("up_start") else 0
+    if not ex.get("upscale_to"):
+        return int(frac(now - job["started"], est_f) * 99)
+    w1 = est_f / (est_f + est_u) * 100
+    if "flow_done" not in ex:
+        return int(frac(now - job["started"], est_f) * w1)
+    if not ex.get("up_start"):
+        return int(w1)
+    return min(99, int(w1 + frac(now - ex["up_start"], est_u) * (100 - w1)))
+
+
 class JobRunner:
     def __init__(self, settings: Settings, store: Store, flow: FlowClient):
         self.settings = settings
@@ -31,6 +56,21 @@ class JobRunner:
         self._tasks: dict[str, asyncio.Task] = {}
         self._comfy_sem = asyncio.Semaphore(1)   # one GPU job at a time
         self._comfy: Optional[ComfyClient] = None
+
+    def _estimates(self, target: Optional[int]) -> tuple[float, float]:
+        """Typical seconds of the Flow step and of the enlarge step to `target`, from the latest finished jobs."""
+        flow: list[float] = []
+        up: list[float] = []
+        for r in self.store.recent_done(80):
+            ex = json.loads(r["extra"] or "{}")
+            if "t_flow" in ex:
+                flow.append(float(ex["t_flow"]))
+            elif not ex.get("upscale_to") and not ex.get("standalone") and r["finished"] and r["started"]:
+                flow.append(r["finished"] - r["started"])
+            if ex.get("t_up") and ex.get("upscale_to") == target:
+                up.append(float(ex["t_up"]))
+        med = lambda xs, d: statistics.median(xs[:20]) if xs else d
+        return med(flow, 45.0), med(up, 90.0)
 
     def comfy_client(self) -> ComfyClient:
         if not self.settings.comfy_url:
@@ -74,6 +114,9 @@ class JobRunner:
         try:
             async with self._sem:
                 self.store.update_job(job_id, status="running", started=time.time(), progress="准备中…")
+                est_f, est_u = self._estimates(job["extra"].get("upscale_to"))
+                job["extra"].update(est_flow=est_f, est_up=est_u)
+                self.store.merge_extra(job_id, {"est_flow": est_f, "est_up": est_u})
                 limit = self.settings.job_timeout + (self.settings.comfy_timeout if job["extra"].get("upscale_to") else 0)
                 await asyncio.wait_for(self._execute(job), timeout=limit)
         except asyncio.CancelledError:
@@ -112,9 +155,14 @@ class JobRunner:
         await self._progress(job_id, f"{tag} · 等待 ComfyUI…")
         async with self._comfy_sem:
             await self._progress(job_id, f"{tag} · 处理中…")
+            t_up = time.time()
+            self.store.merge_extra(job_id, {"up_start": t_up})
+            job["extra"]["up_start"] = t_up
             name = await client.upload_image(data, f"terryflow_{job_id}.png")
             prompt, out = engine[1](name, w, h, target, cfg, job["prompt"] if not strict else "")
-            return await client.run_image(prompt, out, on_progress, self.settings.comfy_timeout)
+            result = await client.run_image(prompt, out, on_progress, self.settings.comfy_timeout)
+            self.store.merge_extra(job_id, {"t_up": time.time() - t_up})
+            return result
 
     async def _execute(self, job: dict) -> None:
         job_id = job["id"]
@@ -150,6 +198,9 @@ class JobRunner:
         url = await self.flow.generate(job["model"], mentions_to_text(job["prompt"], len(ref_ids)), ref_ids, on_progress)
         await self._progress(job_id, step + "下载结果…")
         data = await self.flow.download(url)
+        now = time.time()
+        extra["flow_done"] = now
+        self.store.merge_extra(job_id, {"flow_done": now, "t_flow": now - (self.store.get_job(job_id) or {}).get("started", now)})
         if extra.get("upscale_to"):
             data = await self._upscale(job, data, False)
         saved = save_image_bytes(self.settings, self.store, data, limit=not extra.get("upscale_to"))
