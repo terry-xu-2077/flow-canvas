@@ -399,9 +399,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   // Copy generation cards: same settings and prompt, no results, and the same reference lines (the new card is
   // wired to the same images/collections, with the same <Picture N> numbering). `at` gives the new positions;
   // without it the copy goes into free space next to the original.
-  const cloneGens = useCallback((ids: string[], at?: Record<string, { x: number; y: number }>) => {
+  const cloneGens = useCallback((ids: string[], at?: Record<string, { x: number; y: number }>, keepSelection = false) => {
     const src = nodesRef.current.filter((n): n is GenNodeType => n.type === 'gen' && ids.includes(n.id))
-    if (!src.length) return
+    const made: Record<string, string> = {} // original id -> copy id
+    if (!src.length) return made
     const placed: CanvasNode[] = []
     const copies: GenNodeType[] = []
     const edges: Edge[] = []
@@ -410,40 +411,53 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const pos = at?.[o.id] ?? findFree([...nodesRef.current, ...placed], o.position.x + b.w + 40, o.position.y, b.w, b.h)
       const { prompt, model, ratio, size, count, refIds, onlyRefs } = o.data
       const copy: GenNodeType = {
-        id: uid('g'), type: 'gen', position: pos, width: o.width ?? b.w, height: o.height ?? b.h, selected: true,
+        id: uid('g'), type: 'gen', position: pos, width: o.width ?? b.w, height: o.height ?? b.h, selected: !keepSelection,
         data: { prompt, model, ratio, size, count, jobs: [], handled: [], refIds: refIds ? [...refIds] : undefined, onlyRefs },
       }
+      made[o.id] = copy.id
       placed.push(copy)
       copies.push(copy)
       for (const e of edgesRef.current) {
         if (e.target === o.id && e.className !== 'out') edges.push({ ...edgeBase, id: uid('e'), source: e.source, target: copy.id } as Edge)
       }
     }
-    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), ...copies] as CanvasNode[])
+    setNodes(ns => [...(keepSelection ? ns : ns.map(n => (n.selected ? { ...n, selected: false } : n))), ...copies] as CanvasNode[])
     setEdges(es => [...es, ...edges])
+    return made
   }, [setNodes, setEdges])
 
-  // Alt + drag a generation card: the card stays where it was and the copy lands where it is dropped.
-  const altStart = useRef<Record<string, { x: number; y: number }> | null>(null)
-  const [ghosts, setGhosts] = useState<{ id: string; x: number; y: number; w: number; h: number }[]>([])
+  // Alt + drag a generation card: the card you hold turns into a translucent ghost that follows the pointer, while a
+  // solid card stays where it was. On drop the copy takes the ghost's place; the original keeps its results.
+  const altDrag = useRef<{ start: Record<string, { x: number; y: number }>; copy: Record<string, string> } | null>(null)
   const onNodeDragStart = useCallback((e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
+    altDrag.current = null
     const gens = dragged.filter(n => n.type === 'gen')
-    const on = (e as MouseEvent).altKey && gens.length > 0
-    altStart.current = on ? Object.fromEntries(gens.map(n => [n.id, { ...n.position }])) : null
-    // the card that stays behind is shown as a translucent ghost while the copy is being dragged
-    setGhosts(on ? gens.map(n => ({ id: n.id, x: n.position.x, y: n.position.y, ...nodeBox(n) })) : [])
-  }, [])
+    if (!(e as MouseEvent).altKey || !gens.length) return
+    const start = Object.fromEntries(gens.map(n => [n.id, { ...n.position }]))
+    const copy = cloneGens(gens.map(n => n.id), start, true)
+    altDrag.current = { start, copy }
+    setNodes(ns => ns.map(n => (start[n.id] ? { ...n, className: 'alt-moving' } : n)) as CanvasNode[])
+  }, [cloneGens, setNodes])
   const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
-    const start = altStart.current
-    altStart.current = null
-    setGhosts([])
-    if (!start) return
+    const drag = altDrag.current
+    altDrag.current = null
+    if (!drag) return
+    const { start, copy } = drag
     const at: Record<string, { x: number; y: number }> = {}
     for (const n of dragged) if (start[n.id]) at[n.id] = { ...n.position }
-    if (!Object.keys(at).some(id => at[id].x !== start[id].x || at[id].y !== start[id].y)) return
-    setNodes(ns => ns.map(n => (start[n.id] ? { ...n, position: start[n.id] } : n)) as CanvasNode[])
-    cloneGens(Object.keys(at), at)
-  }, [setNodes, cloneGens])
+    const moved = Object.keys(start).some(id => at[id] && (at[id].x !== start[id].x || at[id].y !== start[id].y))
+    const copyIds = new Set(Object.values(copy))
+    setNodes(ns => {
+      if (!moved) return ns.filter(n => !copyIds.has(n.id)).map(n => (start[n.id] ? { ...n, className: undefined } : n)) as CanvasNode[]
+      const byCopy = Object.fromEntries(Object.entries(copy).map(([o, c]) => [c, o]))
+      return ns.map(n => {
+        if (start[n.id]) return { ...n, position: start[n.id], className: undefined, selected: false }
+        const o = byCopy[n.id]
+        return o ? { ...n, position: at[o] ?? start[o], selected: true } : n
+      }) as CanvasNode[]
+    })
+    if (!moved) setEdges(es => es.filter(e => !copyIds.has(e.target)))
+  }, [setNodes, setEdges])
 
   const addGenCard = useCallback(() => {
     const el = document.querySelector('.react-flow')?.getBoundingClientRect()
@@ -870,11 +884,6 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               </svg>
             </ControlButton>
           </Controls>
-          {ghosts.length > 0 && (
-            <ViewportPortal>
-              {ghosts.map(g => <div key={g.id} className="alt-ghost" style={{ left: g.x, top: g.y, width: g.w, height: g.h }} />)}
-            </ViewportPortal>
-          )}
           {snapOn && (
             <ViewportPortal>
               {guides.v.map((g, i) => <div key={`v${i}`} className="guide" style={{ left: g.x, top: g.y1, width: 0, height: g.y2 - g.y1 }} />)}
