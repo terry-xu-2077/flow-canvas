@@ -32,7 +32,7 @@ def _is_error_line(line: str) -> bool:
 
 
 def mentions_to_text(prompt: str, n_refs: int) -> str:
-    """<Picture N> -> 图片N, N = position in the submitted reference list (1..n_refs).
+    """<Picture N> -> @N, N = position in the submitted reference list (1..n_refs).
 
     A tag that points outside the list would name the wrong image, so it is removed instead.
     """
@@ -40,8 +40,8 @@ def mentions_to_text(prompt: str, n_refs: int) -> str:
         n = int(m.group(1))
         if not 1 <= n <= n_refs:
             return ""
-        # a trailing space keeps "图片1" + "2个人" from reading as 图片12
-        return f"图片{n}" + (" " if m.group(2) else "")
+        # a trailing space keeps "@1" + "2个人" from reading as @12
+        return f"@{n}" + (" " if m.group(2) else "")
     return PICTURE_TAG_RE.sub(one, prompt)
 
 

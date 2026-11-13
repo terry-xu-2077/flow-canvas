@@ -268,9 +268,9 @@ def test_picture_tags_follow_the_submitted_reference_order(env):
     body = {"model": "gemini-3.1-flash-image", "refs": [a1, a2],
             "prompt": "把<Picture 1>里的猫放进<Picture 2>2个人的房间"}
     wait_job(client, client.post("/api/jobs", json=body).json()["jobs"][0])
-    assert fake.chats[0]["messages"][0]["content"][0]["text"] == "把图片1里的猫放进图片2 2个人的房间"
+    assert fake.chats[0]["messages"][0]["content"][0]["text"] == "把@1里的猫放进@2 2个人的房间"
     wait_job(client, client.post("/api/jobs", json={**body, "prompt": "原样 <picture   2> 文本"}).json()["jobs"][0])
-    assert fake.chats[1]["messages"][0]["content"][0]["text"] == "原样 图片2 文本"
+    assert fake.chats[1]["messages"][0]["content"][0]["text"] == "原样 @2 文本"
 
 
 def test_picture_tags_outside_the_reference_list_are_removed(env):
@@ -278,7 +278,7 @@ def test_picture_tags_outside_the_reference_list_are_removed(env):
     a1 = client.post("/api/assets", content=png((9, 9, 9))).json()["id"]
     body = {"model": "gemini-3.1-flash-image", "refs": [a1], "prompt": "<Picture 1>和<Picture 2>和<Picture 0>"}
     wait_job(client, client.post("/api/jobs", json=body).json()["jobs"][0])
-    assert fake.chats[0]["messages"][0]["content"][0]["text"] == "图片1和和"
+    assert fake.chats[0]["messages"][0]["content"][0]["text"] == "@1和和"
     wait_job(client, client.post("/api/jobs", json={"model": "gemini-3.1-flash-image", "prompt": "无参考 <Picture 1> 图"}).json()["jobs"][0])
     assert fake.chats[1]["messages"][0]["content"] == "无参考  图"
 
