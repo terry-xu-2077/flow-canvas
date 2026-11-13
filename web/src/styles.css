@@ -535,3 +535,5 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 
 .copy-btn { opacity: 0; font-size: 15px; line-height: 1; padding: 2px 6px; }
 .card.gen:hover .copy-btn, .card.gen.selected .copy-btn { opacity: 1; }
+
+.alt-ghost { position: absolute; border: 2px dashed var(--accent, #c6f432); border-radius: 14px; background: rgba(198, 244, 50, .07); pointer-events: none; }

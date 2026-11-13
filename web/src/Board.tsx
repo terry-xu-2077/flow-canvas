@@ -425,13 +425,18 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   // Alt + drag a generation card: the card stays where it was and the copy lands where it is dropped.
   const altStart = useRef<Record<string, { x: number; y: number }> | null>(null)
+  const [ghosts, setGhosts] = useState<{ id: string; x: number; y: number; w: number; h: number }[]>([])
   const onNodeDragStart = useCallback((e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
     const gens = dragged.filter(n => n.type === 'gen')
-    altStart.current = (e as MouseEvent).altKey && gens.length ? Object.fromEntries(gens.map(n => [n.id, { ...n.position }])) : null
+    const on = (e as MouseEvent).altKey && gens.length > 0
+    altStart.current = on ? Object.fromEntries(gens.map(n => [n.id, { ...n.position }])) : null
+    // the card that stays behind is shown as a translucent ghost while the copy is being dragged
+    setGhosts(on ? gens.map(n => ({ id: n.id, x: n.position.x, y: n.position.y, ...nodeBox(n) })) : [])
   }, [])
   const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
     const start = altStart.current
     altStart.current = null
+    setGhosts([])
     if (!start) return
     const at: Record<string, { x: number; y: number }> = {}
     for (const n of dragged) if (start[n.id]) at[n.id] = { ...n.position }
@@ -865,6 +870,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               </svg>
             </ControlButton>
           </Controls>
+          {ghosts.length > 0 && (
+            <ViewportPortal>
+              {ghosts.map(g => <div key={g.id} className="alt-ghost" style={{ left: g.x, top: g.y, width: g.w, height: g.h }} />)}
+            </ViewportPortal>
+          )}
           {snapOn && (
             <ViewportPortal>
               {guides.v.map((g, i) => <div key={`v${i}`} className="guide" style={{ left: g.x, top: g.y1, width: 0, height: g.y2 - g.y1 }} />)}
