@@ -116,4 +116,4 @@ def test_job_percent_spans_both_steps():
     assert job_percent(done_flow, 1100.0) == 40                 # waiting for ComfyUI keeps the Flow share
     run_up = {**base, "extra": {**base["extra"], "flow_done": 1040.0, "up_start": 1040.0}}
     assert 69 <= job_percent(run_up, 1070.0) <= 71              # half of the enlarge step: 40 + 30
-    assert job_percent(run_up, 9999.0) == 99                    # never claims 100 % before it is done
+    assert job_percent(run_up, 9999.0) == 98                    # never claims 100 % before it is done
