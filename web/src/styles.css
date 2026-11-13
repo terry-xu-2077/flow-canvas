@@ -538,3 +538,8 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 
 .react-flow__node.alt-moving { opacity: .5; }
 .react-flow__node.alt-moving .card { border-style: dashed; border-color: var(--accent, #c6f432); }
+
+/* the collection arranges its slots to fill the window: cells stretch, the picture is contained in the cell */
+.rs-grid.fit { overflow: hidden; align-content: stretch; align-items: stretch; justify-content: stretch; }
+.rs-grid.fit .rs-slot { aspect-ratio: auto; height: 100%; min-height: 0; }
+.rs-grid:not(.fit) { justify-content: stretch; }

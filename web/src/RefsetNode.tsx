@@ -8,6 +8,29 @@ import type { RefsetNodeType, Slot } from './types'
 const uid = () => `s${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 const isImage = (f: File) => f.type.startsWith('image/')
 
+const GAP = 8
+const MIN_CELL = 84
+
+/** Best grid for n slots inside a w x h area: the column count whose cells come closest to square while every cell
+ *  stays at least MIN_CELL; the cells then stretch to fill the area. When even that does not fit, fall back to
+ *  square cells in a scrolling list. */
+function bestGrid(n: number, w: number, h: number): { cols: number; rows: number; fit: boolean } {
+  if (n <= 0 || w <= 0 || h <= 0) return { cols: 1, rows: 1, fit: false }
+  let best: { cols: number; rows: number; score: number } | null = null
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const cw = (w - GAP * (cols - 1)) / cols
+    const ch = (h - GAP * (rows - 1)) / rows
+    if (cw < MIN_CELL || ch < MIN_CELL) continue
+    // closest to square wins; among equals prefer fewer empty cells
+    const score = Math.abs(Math.log(cw / ch)) + (cols * rows - n) * 0.02
+    if (!best || score < best.score) best = { cols, rows, score }
+  }
+  if (best) return { cols: best.cols, rows: best.rows, fit: true }
+  const cols = Math.max(1, Math.floor((w + GAP) / (MIN_CELL + GAP)))
+  return { cols, rows: Math.ceil(n / cols), fit: false }
+}
+
 /** A reference collection: ordered image slots wired as one block into any number of generation cards. */
 export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
   const canvas = useCanvas()
@@ -26,6 +49,17 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
   }, [menuOpen])
   const [overSlot, setOverSlot] = useState<string | null>(null)
   const slots = data.slots
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [area, setArea] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setArea({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    setArea({ w: el.clientWidth, h: el.clientHeight })
+    return () => ro.disconnect()
+  }, [slots.length === 0])
+  const grid = bestGrid(slots.length, area.w, area.h)
   const filledCount = slots.filter(s => s.assetId).length
 
   /** Upload files in order; the first one fills `startSlot` when it is an empty slot, the rest become new slots. */
@@ -112,7 +146,8 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
           </div>
         </div>
         {(
-          <div className="rs-grid nowheel">
+          <div className={`rs-grid nowheel${grid.fit ? ' fit' : ''}`} ref={gridRef}
+               style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))`, ...(grid.fit ? { gridTemplateRows: `repeat(${grid.rows}, minmax(0, 1fr))` } : {}) }}>
             {slots.map((slot, idx) => {
               return (
                 <div
