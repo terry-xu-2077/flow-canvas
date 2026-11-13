@@ -133,7 +133,7 @@ class Console:
         self.root = ctk.CTk(fg_color=BG)
         self.hide_noise = tk.BooleanVar(value=True)
         self.root.title("Terry Flow 控制台")
-        self.root.geometry("1080x760")
+        self.root.geometry("1080x660")
         self.root.minsize(900, 600)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.build()
