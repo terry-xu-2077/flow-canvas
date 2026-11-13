@@ -167,7 +167,7 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
                     <button className="rs-add" title="点击选择图片，也可以把图片拖到这里"
                             onClick={() => { pickFor.current = slot.id; fileInput.current?.click() }}>＋</button>
                   )}
-                  <div className="rs-cap" title={slot.name}>{slot.assetId ? (slot.name ?? `${slot.w} × ${slot.h}`) : '点击添加'}</div>
+                  <div className="rs-cap" title={slot.name}>{slot.assetId ? (slot.w && slot.h ? `${slot.w} × ${slot.h}` : (slot.name ?? '')) : '点击添加'}</div>
                   {slot.assetId && (
                     <button className="rs-zoom icon" title="放大查看" onClick={() => canvas.preview(slot.assetId!)}>
                       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
