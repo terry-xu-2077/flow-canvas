@@ -552,8 +552,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const numbered = numberedRefs(node.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
     const refs: string[] = []
     const position: Record<number, number> = {}
+    const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
     numbered.forEach((r, i) => {
       if (!r) return
+      if (node.data.onlyRefs && !mentioned.has(i + 1)) return   // "仅发送引用的图": the unmentioned ones stay home
       let p = refs.indexOf(r.assetId)
       if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
       position[i + 1] = p + 1

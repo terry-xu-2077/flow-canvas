@@ -39,6 +39,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const model = canvas.models.find(m => m.key === data.model) ?? canvas.models[0]
   const running = data.jobs.some(j => !FINAL.has(j.status))
   const refs = canvas.refCount(id)
+  const sentCount = new Set(Array.from(data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => m[1])).size
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
   // progress lives under each result placeholder; only a submit that failed before any job existed is shown here
   const visibleJobs = data.jobs.filter(j => j.id.startsWith('x') && j.status === 'failed')
@@ -84,7 +85,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
     <div className={`card gen${selected ? ' selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <div className="card-head">
-        <span className="node-title"><BananaIcon className="ico-banana" />生成卡片{refs > 0 ? ` · 参考图 ${refs}` : ''}</span>
+        <span className="node-title"><BananaIcon className="ico-banana" />生成卡片{refs > 0 ? ` · 参考图 ${refs}${data.onlyRefs ? ` · 发送 ${sentCount}` : ''}` : ''}</span>
       </div>
       <PromptEditor
         value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}
@@ -119,6 +120,13 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
           </div>
           <div className="pop-label">分辨率</div>
           <Segmented options={model?.sizes ?? []} value={data.size} onChange={v => patch({ size: v })} />
+          {refs > 0 && (<>
+            <div className="pop-label">参考图</div>
+            <button className={`pop-toggle${data.onlyRefs ? ' on' : ''}`} onClick={() => patch({ onlyRefs: !data.onlyRefs })}
+                    title="打开后，只把提示词里 @ 引用的图发给生成服务；没引用的图不发送">
+              <span className="box">{data.onlyRefs ? '✓' : ''}</span>仅发送引用的图
+            </button>
+          </>)}
           {canvas.maxCount > 1 && (<>
             <div className="pop-label">一次生成</div>
             <Segmented options={Array.from({ length: canvas.maxCount }, (_, i) => i + 1)} value={data.count}

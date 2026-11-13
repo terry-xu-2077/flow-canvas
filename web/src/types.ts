@@ -18,6 +18,7 @@ export interface GenData extends Record<string, unknown> {
   jobs: JobState[]
   handled: string[] // job ids whose result image was already placed on the canvas
   refIds?: string[] // stable reference numbering of this card: <Picture N> = refIds[N-1]; entries are never reused
+  onlyRefs?: boolean // send only the pictures the prompt mentions (<Picture N>) instead of every connected one
   notice?: string
 }
 
