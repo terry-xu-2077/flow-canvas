@@ -576,7 +576,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const undoStack = useRef<{ nodes: CanvasNode[]; edges: Edge[] }[]>([])
   const onDeleted = useCallback(({ nodes: ns, edges: es }: { nodes: CanvasNode[]; edges: Edge[] }) => {
     if (!ns.length && !es.length) return
-    undoStack.current = [...undoStack.current.slice(-29), { nodes: ns, edges: es }]
+    // a result placeholder (or a card with running jobs) that is deleted must not keep queueing: the server drops those jobs
+    for (const n of ns) {
+      if (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId) void api.cancelJob((n as ImageNodeType).data.jobId!)
+      if (n.type === 'gen') (n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
+    }
+    undoStack.current = [...undoStack.current.slice(-29), { nodes: ns.filter(n => !(n.type === 'image' && (n as ImageNodeType).data.pending)), edges: es }]
     showToast(ns.length ? `已删除 ${ns.length} 个节点，Ctrl+Z 撤销` : '已删除连线，Ctrl+Z 撤销')
   }, [showToast])
   const undoDelete = useCallback(() => {

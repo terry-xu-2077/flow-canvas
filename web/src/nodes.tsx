@@ -43,7 +43,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
   // progress lives under each result placeholder; only a submit that failed before any job existed is shown here
   const visibleJobs = data.jobs.filter(j => j.id.startsWith('x') && j.status === 'failed')
-  const canRun = !!data.prompt.trim() && !running && !!model
+  const canRun = !!data.prompt.trim() && !!model
 
   useEffect(() => {
     if (!open) return
@@ -98,7 +98,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         </button>
         {running && <button onClick={() => canvas.cancelJobs(id)}>取消</button>}
         <button className="primary" disabled={!canRun} onClick={() => canvas.generate(id)}>
-          <SparkleIcon className="ico-spark" />{running ? '生成中…' : '生成'}
+          <SparkleIcon className="ico-spark" />生成
         </button>
       </div>
       {open && (
