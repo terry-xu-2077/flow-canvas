@@ -552,3 +552,44 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 .tile-thumbs { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 6px; overflow: hidden; }
 .tile-thumbs img, .tile-thumbs span { width: 100%; height: 100%; min-height: 0; border-radius: 6px; background: #12151a; }
 .tile-thumbs img { object-fit: cover; display: block; }
+
+/* selection outlines (drag box and the box around selected nodes): accent colour, widely spaced dashes */
+.react-flow__selection, .react-flow__nodesselection-rect {
+  --dash: linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 14px);
+  --dash-v: linear-gradient(180deg, var(--accent) 0 5px, transparent 5px 14px);
+  border: 0 !important; border-radius: 4px;
+  background:
+    var(--dash) top left / 14px 1.5px repeat-x,
+    var(--dash) bottom left / 14px 1.5px repeat-x,
+    var(--dash-v) top left / 1.5px 14px repeat-y,
+    var(--dash-v) top right / 1.5px 14px repeat-y,
+    #d7f23b0d;
+}
+
+/* layer thumbnails */
+.layers li { display: flex; align-items: center; gap: 4px; }
+.layer-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; flex: none; background: #12151a; }
+
+/* resource library pop-up */
+.lib-back { position: fixed; inset: 0; z-index: 50; background: #0009; display: grid; place-items: center; }
+.lib { width: min(1100px, 92vw); height: min(760px, 86vh); background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px #000a; }
+.lib-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.lib-head strong { font-size: 16px; margin-right: 6px; }
+.lib-tabs button { padding: 5px 14px; }
+.lib-gap { flex: 1; }
+.lib-body { flex: 1; overflow: auto; padding: 16px 18px; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.lib-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: #12151a; border: 1px solid var(--line); }
+.lib-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-size { position: absolute; left: 8px; bottom: 8px; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #000a; color: #dfe5ec; }
+.lib-actions { position: absolute; inset: auto 0 0 0; display: flex; gap: 6px; justify-content: center; padding: 28px 8px 10px;
+  background: linear-gradient(transparent, #000c); opacity: 0; transition: opacity .15s; }
+.lib-item:hover .lib-actions { opacity: 1; }
+.lib-item:hover .lib-size { opacity: 0; }
+.lib-actions .btn, .lib-actions button { padding: 5px 12px; border-radius: 999px; font-size: 13px; text-decoration: none; }
+.lib-actions a.btn { display: inline-flex; align-items: center; background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+.lib-actions a.btn:hover { border-color: #5a6676; }
+.lib-note { padding: 8px 18px; font-size: 12.5px; color: #f2d98a; background: #f2d98a14; border-bottom: 1px solid var(--line); }
+.bin-panel button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); color: var(--text); font-size: 14px; cursor: pointer; }
+.bin-panel button:hover { border-color: #5a6676; background: var(--panel2); }

@@ -13,6 +13,7 @@ import { nodeTypes } from './nodes'
 import { edgeTypes } from './DeletableEdge'
 import UsageBadge from './UsageBadge'
 import { UserMenu } from './UserMenu'
+import { Library } from './Library'
 import type { RefInfo } from './PromptEditor'
 import {
   GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
@@ -143,6 +144,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [libOpen, setLibOpen] = useState(false)
   const [toast, setToast] = useState<{ text: string; err?: boolean; n: number } | null>(null)
   const showToast = useCallback((text: string, err = false) => setToast(t => ({ text, err, n: (t?.n ?? 0) + 1 })), [])
   useEffect(() => {
@@ -511,6 +513,14 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       }
     }
   }, [rf, setNodes])
+
+  // an image that already exists on the server (recycle bin) goes onto the canvas without uploading
+  const placeAsset = useCallback((item: { asset: string; w: number; h: number }) => {
+    const base = rf.screenToFlowPosition({ x: window.innerWidth / 2 - 140, y: window.innerHeight / 2 - 100 })
+    const spot = findFree(nodesRef.current, base.x, base.y, IMAGE_WIDTH, imgHeight(item.w, item.h) + 40)
+    setNodes(ns => [...ns, newImageNode(item.asset, item.w, item.h, spot.x, spot.y)])
+    showToast('已放到画布')
+  }, [rf, setNodes, showToast])
 
   // One image goes straight onto the canvas; several ask first (loose images or one collection).
   const placeImages = useCallback((files: File[], at?: { x: number; y: number }, screen?: { x: number; y: number }) => {
@@ -936,7 +946,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               {guides.h.map((g, i) => <div key={`h${i}`} className="guide" style={{ left: g.x1, top: g.y, width: g.x2 - g.x1, height: 0 }} />)}
             </ViewportPortal>
           )}
-          <MiniMap pannable zoomable nodeStrokeWidth={2} />
+          <MiniMap pannable zoomable nodeStrokeWidth={2} style={{ marginBottom: 64 }} />
+          <Panel position="bottom-right" className="bin-panel">
+            <button className="bin-btn" onClick={() => setLibOpen(true)} title="回收站：之前生成和上传的内容，可下载或再次放到画布上（会不定期清理）">
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent)' }}>
+                <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v4.5M9.5 6.5v4.5" /></svg> 回收站{busyUploads ? `（${busyUploads}）` : ''}
+            </button>
+          </Panel>
           <Panel position="top-left" className="toolbar">
             <button className="brand-btn" onClick={onBack} title="返回画板列表"><BrandMark size={32} /></button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
@@ -952,11 +968,16 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               <ul>
                 {[...nodes].reverse().map(n => (
                   <li key={n.id} className={n.selected ? 'on' : ''} onClick={() => focusNode(n.id)}>
-                    {n.type === 'gen'
-                      ? <><BananaIcon className="ico-banana" /> 生成卡片 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
-                      : n.type === 'refset'
-                        ? <><CollectionIcon className="ico-collection" /> 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
-                        : <><ImageIcon className="ico-image" /> {(n as ImageNodeType).data.pending ? '图片 · 生成中' : `图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}</>}
+                    {(() => {
+                      const thumb = n.type === 'image' ? (n as ImageNodeType).data.assetId
+                        : n.type === 'refset' ? (n as RefsetNodeType).data.slots.find(s => s.assetId)?.assetId : undefined
+                      const pic = thumb ? <img className="layer-thumb" src={assetUrl(thumb, 96)} alt="" draggable={false} /> : null
+                      return n.type === 'gen'
+                        ? <><BananaIcon className="ico-banana" /> 生成卡片 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
+                        : n.type === 'refset'
+                          ? <>{pic ?? <CollectionIcon className="ico-collection" />} 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
+                          : <>{pic ?? <ImageIcon className="ico-image" />} {(n as ImageNodeType).data.pending ? '图片 · 生成中' : `图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}</>
+                    })()}
                   </li>
                 ))}
               </ul>
@@ -968,9 +989,6 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             </button>
             <button onClick={() => addRefset()} title="新建参考集合（R）：把多张参考图放在一起，连给任意生成卡片">
               <CollectionIcon /> 参考集合 <kbd>R</kbd>
-            </button>
-            <button onClick={() => fileInput.current?.click()} title="上传图片（U）">
-              <ImageIcon /> 上传图片{busyUploads ? `（${busyUploads}）` : ''} <kbd>U</kbd>
             </button>
             <span className="sep" />
             <button onClick={fitAll} title="适应画面（F）">适应画面 <kbd>F</kbd></button>
@@ -989,6 +1007,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             点「＋ 生成卡片」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
           </div>
         )}
+        {libOpen && <Library onClose={() => setLibOpen(false)} onPlace={placeAsset} onUpload={() => fileInput.current?.click()} />}
         {selBar && (
           <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
             已选 {selectedImages.length} 张图

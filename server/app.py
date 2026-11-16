@@ -355,6 +355,10 @@ def create_app(settings: Optional[Settings] = None, flow: Optional[FlowClient] =
         except AssetError as exc:
             raise HTTPException(400, str(exc))
 
+    @app.get("/api/library")
+    async def library(user: str = user_dep):
+        return store.library(user)
+
     @app.get("/api/assets/{asset_id}")
     async def get_asset(asset_id: str, w: Optional[int] = None, download: bool = False):
         meta = store.get_asset(asset_id) if re.fullmatch(r"[0-9a-f]{40}", asset_id) else None

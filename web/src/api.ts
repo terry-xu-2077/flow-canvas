@@ -34,7 +34,10 @@ const json = (method: string, body: unknown): RequestInit => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
 
+export interface LibraryItem { asset: string; w: number; h: number; created: number; prompt?: string; model?: string }
+
 export const api = {
+  library: () => call<{ generated: LibraryItem[]; uploaded: LibraryItem[] }>('/api/library'),
   models: () => call<{ models: ModelInfo[]; max_count: number; upscale?: UpscaleInfo }>('/api/models'),
   usage: () => call<{ credits: number | null; image_daily: { name: string; used: number; limit: number }[]; date?: string }>('/api/usage'),
   users: () => call<{ users: UserInfo[] }>('/api/users').then(r => r.users),

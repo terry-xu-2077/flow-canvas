@@ -127,6 +127,33 @@ class Store:
         rows = self._all(f"SELECT id FROM assets WHERE id IN ({marks}) ORDER BY created DESC LIMIT ?", (*ids, limit))
         return [r["id"] for r in rows]
 
+    def library(self, user: str, limit: int = 300) -> dict[str, list[dict]]:
+        """Every image the user has made or brought in: generated (finished jobs) and uploaded (images on their boards
+        that no job produced), newest first."""
+        gen = self._all(
+            "SELECT j.result_asset AS asset, j.prompt AS prompt, j.model AS model, a.w AS w, a.h AS h, MAX(j.finished) AS created "
+            "FROM jobs j JOIN assets a ON a.id=j.result_asset WHERE j.user=? AND j.status='done' AND j.result_asset IS NOT NULL "
+            "GROUP BY j.result_asset ORDER BY created DESC LIMIT ?", (user, limit))
+        made = {g["asset"] for g in self._all("SELECT DISTINCT result_asset AS asset FROM jobs WHERE user=? AND result_asset IS NOT NULL", (user,))}
+        found: set[str] = set()
+        for r in self._all("SELECT data FROM boards WHERE user=?", (user,)):
+            try:
+                nodes = json.loads(r["data"] or "{}").get("nodes") or []
+            except ValueError:
+                continue
+            for n in nodes:
+                d = n.get("data") if isinstance(n.get("data"), dict) else {}
+                if n.get("type") == "image" and d.get("assetId"):
+                    found.add(d["assetId"])
+                elif n.get("type") == "refset":
+                    found.update(s["assetId"] for s in d.get("slots") or [] if s.get("assetId"))
+        ids = list(found - made)
+        up: list[dict] = []
+        if ids:
+            marks = ",".join("?" * len(ids))
+            up = self._all(f"SELECT id AS asset, w, h, created FROM assets WHERE id IN ({marks}) ORDER BY created DESC LIMIT ?", (*ids, limit))
+        return {"generated": gen, "uploaded": up}
+
     def create_board(self, user: str, board_id: str, name: str) -> dict:
         now = time.time()
         self._run("INSERT INTO boards (user,id,name,data,created,updated) VALUES (?,?,?,?,?,?)",
