@@ -113,7 +113,7 @@ class Store:
             r["thumbs"] = self._recent_assets(r.pop("data"))
         return rows
 
-    def _recent_assets(self, blob: str, limit: int = 4) -> list[str]:
+    def _recent_assets(self, blob: str, limit: int = 2) -> list[str]:
         """Asset ids of the newest images on a board (imported or generated), newest first."""
         try:
             nodes = json.loads(blob or "{}").get("nodes") or []

@@ -113,7 +113,7 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
           <div key={b.id} className="tile" onClick={() => onOpen(b.id)}>
             <strong>{b.name}</strong>
             <div className="tile-thumbs">
-              {[0, 1, 2, 3].map(i => b.thumbs?.[i]
+              {[0, 1].map(i => b.thumbs?.[i]
                 ? <img key={i} src={assetUrl(b.thumbs[i], 320)} alt="" loading="lazy" draggable={false} />
                 : <span key={i} />)}
             </div>
