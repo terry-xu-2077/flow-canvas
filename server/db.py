@@ -108,8 +108,24 @@ class Store:
 
     # -- boards
     def list_boards(self, user: str) -> list[dict]:
-        return self._all(
-            "SELECT id, name, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))
+        rows = self._all("SELECT id, name, data, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))
+        for r in rows:
+            r["thumbs"] = self._recent_assets(r.pop("data"))
+        return rows
+
+    def _recent_assets(self, blob: str, limit: int = 4) -> list[str]:
+        """Asset ids of the newest images on a board (imported or generated), newest first."""
+        try:
+            nodes = json.loads(blob or "{}").get("nodes") or []
+        except ValueError:
+            return []
+        ids = list({n["data"]["assetId"] for n in nodes
+                    if n.get("type") == "image" and isinstance(n.get("data"), dict) and n["data"].get("assetId")})
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        rows = self._all(f"SELECT id FROM assets WHERE id IN ({marks}) ORDER BY created DESC LIMIT ?", (*ids, limit))
+        return [r["id"] for r in rows]
 
     def create_board(self, user: str, board_id: str, name: str) -> dict:
         now = time.time()

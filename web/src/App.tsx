@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, clearUser, getUser, setUser, type BoardMeta, type UserInfo } from './api'
+import { api, assetUrl, clearUser, getUser, setUser, type BoardMeta, type UserInfo } from './api'
 import { Avatar } from './Avatar'
 import { UserMenu } from './UserMenu'
 import { NAME_RE, ProfileEditor, resolveAvatar, type AvatarChoice } from './ProfileEditor'
@@ -112,6 +112,11 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
         {boards?.map(b => (
           <div key={b.id} className="tile" onClick={() => onOpen(b.id)}>
             <strong>{b.name}</strong>
+            <div className="tile-thumbs">
+              {[0, 1, 2, 3].map(i => b.thumbs?.[i]
+                ? <img key={i} src={assetUrl(b.thumbs[i], 320)} alt="" loading="lazy" draggable={false} />
+                : <span key={i} />)}
+            </div>
             <small>{new Date(b.updated * 1000).toLocaleString()}</small>
             <button className="icon tile-dl" title="下载整个画板（zip：画布内容 + 全部图片）" onClick={async e => {
               e.stopPropagation()

@@ -1,7 +1,7 @@
 export interface ModelInfo { key: string; name: string; ratios: string[]; sizes: string[] }
 export interface UpscaleOption { size: string; target: number; engine: string }
 export interface UpscaleInfo { enabled: boolean; options: UpscaleOption[] }
-export interface BoardMeta { id: string; name: string; created: number; updated: number }
+export interface BoardMeta { id: string; name: string; created: number; updated: number; thumbs?: string[] }
 export interface JobInfo {
   id: string; node: string | null; status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   progress: string; error: string | null; result_asset: string | null; model: string
