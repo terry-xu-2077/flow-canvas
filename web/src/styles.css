@@ -359,7 +359,7 @@ button, select, input { border-radius: var(--r-ctl); }
 .edge-x { position: absolute; pointer-events: all; width: 22px; height: 22px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; background: #1b2027; border: 1px solid #8fa0b5; color: #dfe6ee; cursor: pointer; }
 .edge-x:hover { background: #2a313b; border-color: #c9d4e0; color: #fff; }
-.react-flow__edge.selected .react-flow__edge-path, .react-flow__edge.selected:focus .react-flow__edge-path, .react-flow__edge.selected:focus-visible .react-flow__edge-path { stroke: var(--accent) !important; stroke-width: 3.5 !important; filter: drop-shadow(0 0 4px #d7f23b88); }
+.react-flow__edge:focus .react-flow__edge-path, .react-flow__edge:focus-visible .react-flow__edge-path, .react-flow__edge.selected .react-flow__edge-path, .react-flow__edge.selected:focus .react-flow__edge-path, .react-flow__edge.selected:focus-visible .react-flow__edge-path { stroke: var(--accent) !important; stroke-width: 3.5 !important; filter: drop-shadow(0 0 4px #d7f23b88); }
 .react-flow__edge:focus, .react-flow__edge:focus-visible { outline: none; }
 .edge-x { z-index: 1001; }
 
