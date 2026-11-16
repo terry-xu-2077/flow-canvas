@@ -16,6 +16,7 @@ import time
 import tkinter as tk
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 import customtkinter as ctk
@@ -130,7 +131,13 @@ class Console:
         self.server = ServerThread(self.settings)
         self.flow: dict = {"usage": None, "health": None, "error": ""}
         ctk.set_appearance_mode("Dark")
+        try:   # own taskbar identity: without it the window is grouped under pythonw.exe and shows its icon
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TerryFlow.Console")
+        except Exception:
+            pass
         self.root = ctk.CTk(fg_color=BG)
+        self.set_icon(self.root)
         self.hide_noise = tk.BooleanVar(value=True)
         self.root.title("Terry Flow 控制台")
         self.root.geometry("1080x660")
@@ -141,6 +148,21 @@ class Console:
         threading.Thread(target=self.flow_loop, daemon=True).start()
         self.root.after(200, self.pump_log)
         self.root.after(300, self.refresh)
+
+    ICON = Path(__file__).resolve().parent.parent / "assets" / "TerryFlow.ico"
+
+    def set_icon(self, win) -> None:
+        """Window + taskbar icon. customtkinter installs its own icon ~200 ms after creating a window, so ours goes on after that."""
+        if not self.ICON.exists():
+            return
+
+        def apply() -> None:
+            try:
+                win.iconbitmap(str(self.ICON))
+            except Exception:
+                pass
+        apply()
+        win.after(300, apply)
 
     # ---- layout
     def build(self) -> None:
@@ -241,6 +263,7 @@ class Console:
     def open_settings(self) -> None:
         import json
         win = ctk.CTkToplevel(self.root, fg_color=BG)
+        self.set_icon(win)
         win.title("服务器设置")
         win.geometry("700x640")
         win.transient(self.root)
