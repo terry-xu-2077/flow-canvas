@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
-  type Connection, type Edge, type NodeChange,
+  type Connection, type Edge, type EdgeChange, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo, type UpscaleInfo, type UpscaleOption } from './api'
@@ -863,6 +863,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }, 0)
   }, [rf, setEdges])
 
+  // While a box-select is being dragged, React Flow also selects the lines between the boxed nodes; ignore that.
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    onEdgesChange(marqueeStart.current ? changes.filter(c => !(c.type === 'select' && c.selected)) : changes)
+  }, [onEdgesChange])
+
   const duplicate = useCallback((id: string) => cloneGens([id]), [cloneGens])
   const refsOf = useCallback((genId: string) => {
     const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
@@ -905,7 +910,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       <div className="board" onDrop={onDrop} onDragOver={e => e.preventDefault()}>
         <ReactFlow
           nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-          onNodesChange={handleNodesChange} onEdgesChange={onEdgesChange}
+          onNodesChange={handleNodesChange} onEdgesChange={handleEdgesChange}
           onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop}
           onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
