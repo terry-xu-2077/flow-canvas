@@ -41,7 +41,7 @@ class Settings:
     # Options switched off for everyone (they are hidden in the UI and refused by the API).
     disabled_models: tuple = ()   # model family keys, e.g. "gemini-3.1-flash-lite-image"
     disabled_sizes: tuple = ()    # e.g. "4K"
-    max_count: int = 8            # most images one card may ask for at once (fixed; the real throttle is user_concurrency)
+    max_count: int = 4            # most images one card may ask for at once (fixed; the real throttle is user_concurrency)
     # How many images one user may have generating at the same time (across all their cards); the rest wait in line.
     user_concurrency: int = 4
     # Local ComfyUI used for enlarging (and later other jobs). Empty url = not configured.
