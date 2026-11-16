@@ -1,6 +1,6 @@
 :root {
   --bg: #12151a; --panel: #1b2027; --panel2: #232a33; --line: #323a46; --text: #dfe5ec; --muted: #8d98a6;
-  --accent: #b6f23a; /* lemon green, used sparingly */
+  --accent: #d7f23b; /* lemon green, used sparingly */
   --danger: #ff7a7a;
   font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   color: var(--text); background: var(--bg);
@@ -129,7 +129,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 
 .pchip { display: inline-flex; align-items: center; gap: 4px; margin: 1px 2px; padding: 1px 7px 1px 2px; border-radius: 6px; font-size: 12px;
   line-height: 1.5; white-space: nowrap; vertical-align: middle; user-select: all; cursor: pointer;
-  background: #b6f23a1f; color: #e3ffb0; box-shadow: inset 0 0 0 1px #b6f23a44; }
+  background: #d7f23b1f; color: #e3ffb0; box-shadow: inset 0 0 0 1px #d7f23b44; }
 .pchip img { width: 24px; height: 24px; object-fit: cover; border-radius: 4px; }
 .pchip .ic { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; background: #ffffff17; font-size: 11px; }
 .pchip.missing { background: #ff5a5a1f; color: #ffbebe; box-shadow: inset 0 0 0 1px #ff5a5a59; }
@@ -143,7 +143,7 @@ kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var
 .at-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .at-info { min-width: 0; } .at-info b, .at-info small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .at-info b { font-size: 12px; } .at-info small { margin-top: 3px; font-size: 11px; color: var(--muted); }
-.at-tag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; background: #b6f23a1f; color: #e3ffb0; font-size: 10px; font-weight: 500; }
+.at-tag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; background: #d7f23b1f; color: #e3ffb0; font-size: 10px; font-weight: 500; }
 .at-empty { padding: 16px 8px; text-align: center; font-size: 12px; color: var(--muted); line-height: 1.6; }
 
 /* ---- reference collection */
@@ -313,7 +313,7 @@ button, select, input { border-radius: var(--r-ctl); }
 .card.image.pending { background: #141920; border-color: #ffffff10; overflow: hidden; }
 .card.image.pending .shimmer { position: absolute; inset: 0; }
 .card.image.pending .shimmer::before { content: ''; position: absolute; inset: -30%;
-  background: radial-gradient(circle at 30% 30%, #b6f23a40, transparent 52%), radial-gradient(circle at 72% 68%, #6ea8ff38, transparent 52%);
+  background: radial-gradient(circle at 30% 30%, #d7f23b40, transparent 52%), radial-gradient(circle at 72% 68%, #6ea8ff38, transparent 52%);
   animation: glow 3.2s ease-in-out infinite; }
 .card.image.pending .shimmer::after { content: ''; position: absolute; top: 0; bottom: 0; left: -100%; right: -100%; will-change: transform;
   background: linear-gradient(110deg, transparent 42%, #ffffff14 50%, transparent 58%); animation: sweep 2.4s linear infinite; }
@@ -530,14 +530,14 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 /* generation card: "仅发送引用的图" switch in the settings popover */
 .pop-toggle { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px; justify-content: flex-start; }
 .pop-toggle .box { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #556070; display: grid; place-items: center; font-size: 12px; line-height: 1; }
-.pop-toggle.on { border-color: var(--accent, #b6f23a); }
-.pop-toggle.on .box { background: var(--accent, #b6f23a); border-color: var(--accent, #b6f23a); color: #11161c; }
+.pop-toggle.on { border-color: var(--accent, #d7f23b); }
+.pop-toggle.on .box { background: var(--accent, #d7f23b); border-color: var(--accent, #d7f23b); color: #11161c; }
 
 .copy-btn { opacity: 0; font-size: 15px; line-height: 1; padding: 2px 6px; }
 .card.gen:hover .copy-btn, .card.gen.selected .copy-btn { opacity: 1; }
 
 .react-flow__node.alt-moving { opacity: .5; }
-.react-flow__node.alt-moving .card { border-style: dashed; border-color: var(--accent, #c6f432); }
+.react-flow__node.alt-moving .card { border-style: dashed; border-color: var(--accent, #d7f23b); }
 
 /* the collection arranges its slots to fill the window: cells stretch, the picture is contained in the cell */
 .rs-grid.fit { overflow: hidden; align-content: stretch; align-items: stretch; justify-content: stretch; }
