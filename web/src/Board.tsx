@@ -236,15 +236,27 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   // Remember the numbering of every reference connected to a card (new ones get the next free number).
   useEffect(() => {
     if (!loaded) return
-    const updates = new Map<string, string[]>()
+    const updates = new Map<string, { refIds: string[]; prompt: string }>()
     for (const n of nodes) {
       if (n.type !== 'gen') continue
       const known = (n as GenNodeType).data.refIds
       const keys = collectRefs(n.id, nodes, edges).map(r => r.key)
       const fresh = keys.filter(k => !(known ?? []).includes(k))
-      if (known === undefined || fresh.length) updates.set(n.id, [...(known ?? []), ...fresh])
+      // Numbers stay stable while a prompt still mentions them, but a disconnected reference nobody mentions is
+      // dropped and the rest close ranks (so 3 connected images read 图1-3, not 图10).
+      const prompt = (n as GenNodeType).data.prompt
+      const mentioned = new Set(Array.from(prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
+      const all = [...(known ?? []), ...fresh]
+      const keep = all.map((k, i) => keys.includes(k) || mentioned.has(i + 1))
+      if (known === undefined || fresh.length || keep.some(k => !k)) {
+        const map = new Map<number, number>()
+        let to = 0
+        all.forEach((_, i) => { if (keep[i]) { to++; if (to !== i + 1) map.set(i + 1, to) } })
+        const nextPrompt = map.size ? prompt.replace(/<Picture\s+(\d+)>/gi, (m, d) => (map.has(Number(d)) ? `<Picture ${map.get(Number(d))}>` : m)) : prompt
+        updates.set(n.id, { refIds: all.filter((_, i) => keep[i]), prompt: nextPrompt })
+      }
     }
-    if (updates.size) setNodes(ns => ns.map(n => (updates.has(n.id) ? ({ ...n, data: { ...n.data, refIds: updates.get(n.id) } } as CanvasNode) : n)))
+    if (updates.size) setNodes(ns => ns.map(n => (updates.has(n.id) ? ({ ...n, data: { ...n.data, ...updates.get(n.id) } } as CanvasNode) : n)))
   }, [loaded, nodes, edges, setNodes])
 
   const toggleSnap = useCallback(() => {
