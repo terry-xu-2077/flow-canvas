@@ -946,13 +946,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               {guides.h.map((g, i) => <div key={`h${i}`} className="guide" style={{ left: g.x1, top: g.y, width: g.x2 - g.x1, height: 0 }} />)}
             </ViewportPortal>
           )}
-          <MiniMap pannable zoomable nodeStrokeWidth={2} style={{ marginBottom: 64 }} />
-          <Panel position="bottom-right" className="bin-panel">
-            <button className="bin-btn" onClick={() => setLibOpen(true)} title="回收站：之前生成和上传的内容，可下载或再次放到画布上（会不定期清理）">
-              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent)' }}>
-                <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v4.5M9.5 6.5v4.5" /></svg> 回收站{busyUploads ? `（${busyUploads}）` : ''}
-            </button>
-          </Panel>
+          <MiniMap pannable zoomable nodeStrokeWidth={2} />
           <Panel position="top-left" className="toolbar">
             <button className="brand-btn" onClick={onBack} title="返回画板列表"><BrandMark size={32} /></button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
@@ -993,6 +987,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             <span className="sep" />
             <button onClick={fitAll} title="适应画面（F）">适应画面 <kbd>F</kbd></button>
             <button className={layersOpen ? 'on' : ''} onClick={() => setLayersOpen(o => !o)} title="图层（L）">图层 <kbd>L</kbd></button>
+            <span className="sep" />
+            <button className={libOpen ? 'on' : ''} onClick={() => setLibOpen(true)} title="回收站：之前生成和上传的内容，可下载或再次放到画布上（会不定期清理）">
+              回收站{busyUploads ? `（${busyUploads}）` : ''}
+            </button>
             <input ref={fileInput} type="file" accept="image/*" multiple hidden
                    onChange={e => { placeImages(Array.from(e.target.files ?? [])); e.target.value = '' }} />
           </Panel>
@@ -1007,7 +1005,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             点「＋ 生成卡片」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
           </div>
         )}
-        {libOpen && <Library onClose={() => setLibOpen(false)} onPlace={placeAsset} onUpload={() => fileInput.current?.click()} />}
+        {libOpen && <Library onClose={() => setLibOpen(false)} onPlace={placeAsset} onPreview={setPreviewId} />}
         {selBar && (
           <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
             已选 {selectedImages.length} 张图

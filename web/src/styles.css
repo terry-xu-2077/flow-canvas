@@ -66,7 +66,7 @@ textarea { width: 100%; resize: vertical; line-height: 1.45; }
 .react-flow__handle { width: 12px; height: 12px; background: var(--panel2); border: 2px solid #8fa0b5; }
 .react-flow__handle:hover { border-color: var(--accent); }
 .lightbox { position: fixed; inset: 0; background: #000c; display: flex; flex-direction: column; gap: 10px;
-  align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; }
+  align-items: center; justify-content: center; z-index: 60; cursor: zoom-out; }
 .lightbox img { max-width: 92vw; max-height: 86vh; border-radius: 8px; }
 .lightbox a { color: var(--text); }
 
@@ -593,3 +593,6 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 .lib-note { padding: 8px 18px; font-size: 12.5px; color: #f2d98a; background: #f2d98a14; border-bottom: 1px solid var(--line); }
 .bin-panel button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); color: var(--text); font-size: 14px; cursor: pointer; }
 .bin-panel button:hover { border-color: #5a6676; background: var(--panel2); }
+.lib-tabs button { white-space: nowrap; flex: none; }
+.lib-item { cursor: zoom-in; }
+.lib-actions { cursor: default; }
