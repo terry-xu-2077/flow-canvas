@@ -359,7 +359,8 @@ button, select, input { border-radius: var(--r-ctl); }
 .edge-x { position: absolute; pointer-events: all; width: 22px; height: 22px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; background: #1b2027; border: 1px solid #8fa0b5; color: #dfe6ee; cursor: pointer; }
 .edge-x:hover { background: #2a313b; border-color: #c9d4e0; color: #fff; }
-.react-flow__edge.selected .react-flow__edge-path { stroke: #c9d4e0; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent); stroke-width: 3.5; filter: drop-shadow(0 0 4px #d7f23b88); }
+.edge-x { z-index: 1001; }
 
 /* existing users on the login page */
 .user-chip { border-radius: 999px; padding: 6px 14px; background: #1b2027; border: 1px solid #2c343f; color: #dfe6ee; cursor: pointer; }

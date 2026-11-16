@@ -836,6 +836,33 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     if (isValidConnection(c)) onConnect(c)
   }, [isValidConnection, onConnect, editSlots, setEdges])
 
+  // A box-select that catches no node but crosses some lines selects those lines.
+  const marqueeStart = useRef<{ x: number; y: number } | null>(null)
+  const onSelectionEnd = useCallback((e: MouseEvent | React.MouseEvent) => {
+    const a = marqueeStart.current
+    marqueeStart.current = null
+    if (!a) return
+    const x0 = Math.min(a.x, e.clientX), x1 = Math.max(a.x, e.clientX), y0 = Math.min(a.y, e.clientY), y1 = Math.max(a.y, e.clientY)
+    if (x1 - x0 < 4 && y1 - y0 < 4) return
+    setTimeout(() => {
+      if (rf.getNodes().some(n => n.selected)) return
+      const hit = new Set<string>()
+      document.querySelectorAll<SVGPathElement>('.react-flow__edge-path').forEach(path => {
+        const id = path.closest('.react-flow__edge')?.getAttribute('data-id')
+        const m = path.getScreenCTM()
+        if (!id || !m) return
+        const len = path.getTotalLength()
+        const step = Math.max(len / 200, 2)
+        for (let l = 0; l <= len; l += step) {
+          const pt = path.getPointAtLength(l)
+          const x = m.a * pt.x + m.c * pt.y + m.e, y = m.b * pt.x + m.d * pt.y + m.f
+          if (x >= x0 && x <= x1 && y >= y0 && y <= y1) { hit.add(id); break }
+        }
+      })
+      if (hit.size) setEdges(es => es.map(ed => ({ ...ed, selected: hit.has(ed.id) })))
+    }, 0)
+  }, [rf, setEdges])
+
   const duplicate = useCallback((id: string) => cloneGens([id]), [cloneGens])
   const refsOf = useCallback((genId: string) => {
     const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
@@ -884,6 +911,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
           minZoom={0.1} maxZoom={2} selectionOnDrag selectionMode={SelectionMode.Partial} panOnDrag={[1, 2]} panActivationKeyCode="Space"
           selectionKeyCode={null} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+          onSelectionStart={e => { marqueeStart.current = { x: e.clientX, y: e.clientY } }} onSelectionEnd={onSelectionEnd}
+          elevateEdgesOnSelect
           deleteKeyCode={['Delete', 'Backspace']} proOptions={{ hideAttribution: true }}
           colorMode="dark" fitView={false}
         >
