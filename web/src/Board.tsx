@@ -177,7 +177,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       // Boards saved before nodes were resizable have no stored size: give them the default one.
       const loadedNodes = ((d.nodes || []) as CanvasNode[]).map(n => {
         const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : n.type === 'refset' ? REFSET_WIDTH : GEN_WIDTH)
-        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? undefined : GEN_HEIGHT)
+        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? 220 : GEN_HEIGHT)
         return { ...n, width, height } as CanvasNode
       })
       const loadedEdges = (d.edges || []) as Edge[]
@@ -343,7 +343,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const c = at ?? rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2 - REFSET_WIDTH / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 3 })
     const spot = findFree(nodesRef.current, c.x, c.y, REFSET_WIDTH, 220)
     const node: RefsetNodeType = {
-      id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH,
+      id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH, height: 220,
       data: { slots: slots.length ? slots : [{ id: uid('s') }, { id: uid('s') }, { id: uid('s') }] },
     }
     setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true } as CanvasNode])
@@ -360,7 +360,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const gone = new Set(images.map(i => i.id))
     const rest = nodesRef.current.filter(n => !gone.has(n.id))
     const spot = findFree(rest, Math.min(...images.map(i => i.position.x)), Math.min(...images.map(i => i.position.y)), REFSET_WIDTH, 220)
-    const node: RefsetNodeType = { id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH, data: { slots } }
+    const node: RefsetNodeType = { id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH, height: 220, data: { slots } }
     setNodes(ns => [
       ...ns.filter(n => !gone.has(n.id)).map(n => {
         if (n.type === 'gen' && n.data.refIds) return { ...n, selected: false, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode
@@ -572,6 +572,27 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [placeImages, addToRefset, editSlots, rf, setNodes, showToast])
 
   // Ctrl/Cmd+C on selected pictures copies the picture itself (as an image) to the system clipboard.
+  // ---- undo for deletions (Ctrl+Z): every delete (key, ✕ button, menu) is remembered with its lines
+  const undoStack = useRef<{ nodes: CanvasNode[]; edges: Edge[] }[]>([])
+  const onDeleted = useCallback(({ nodes: ns, edges: es }: { nodes: CanvasNode[]; edges: Edge[] }) => {
+    if (!ns.length && !es.length) return
+    undoStack.current = [...undoStack.current.slice(-29), { nodes: ns, edges: es }]
+    showToast(ns.length ? `已删除 ${ns.length} 个节点，Ctrl+Z 撤销` : '已删除连线，Ctrl+Z 撤销')
+  }, [showToast])
+  const undoDelete = useCallback(() => {
+    const last = undoStack.current.pop()
+    if (!last) { showToast('没有可撤销的删除'); return }
+    const have = new Set(nodesRef.current.map(n => n.id))
+    const back = last.nodes.filter(n => !have.has(n.id))
+    const ids = new Set([...have, ...back.map(n => n.id)])
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), ...back.map(n => ({ ...n, selected: true }) as CanvasNode)])
+    setEdges(es => {
+      const known = new Set(es.map(e => e.id))
+      return [...es, ...last.edges.filter(e => !known.has(e.id) && ids.has(e.source) && ids.has(e.target)).map(e => ({ ...e, selected: false }))]
+    })
+    showToast('已撤销删除')
+  }, [setNodes, setEdges, showToast])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'c') return
@@ -602,6 +623,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (['TEXTAREA', 'INPUT', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undoDelete(); return }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd') {
         const ids = nodesRef.current.filter(n => n.selected && n.type === 'gen').map(n => n.id)
         if (ids.length) { e.preventDefault(); cloneGens(ids) }
@@ -619,7 +641,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [addGenCard, addRefset, fitAll, previewId, cloneGens])
+  }, [addGenCard, addRefset, fitAll, previewId, cloneGens, undoDelete])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[]) => {
@@ -927,7 +949,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           minZoom={0.1} maxZoom={2} selectionOnDrag selectionMode={SelectionMode.Partial} panOnDrag={[1, 2]} panActivationKeyCode="Space"
           selectionKeyCode={null} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
           onSelectionStart={e => { marqueeStart.current = { x: e.clientX, y: e.clientY } }} onSelectionEnd={onSelectionEnd}
-          elevateEdgesOnSelect
+          elevateEdgesOnSelect onDelete={onDeleted}
           deleteKeyCode={['Delete', 'Backspace']} proOptions={{ hideAttribution: true }}
           colorMode="dark" fitView={false}
         >
