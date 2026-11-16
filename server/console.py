@@ -236,7 +236,7 @@ class Console:
     # ---- settings window: where each resolution comes from, ComfyUI models, and the main config.json options
     ROUTES = {"Flow 原生": ("flow", ""), "SeedVR2（ComfyUI 放大）": ("comfy", "seedvr2"), "PiD（ComfyUI 放大）": ("comfy", "pid"),
               "关闭": ("off", "")}
-    NEED_RESTART = ("flow_base_url", "flow_api_key", "port", "max_parallel_jobs")
+    NEED_RESTART = ("flow_base_url", "flow_api_key", "port", "max_parallel_jobs", "user_concurrency")
 
     def open_settings(self) -> None:
         import json
@@ -324,7 +324,7 @@ class Console:
                  ("Flow API Key（重启生效）", "flow_api_key", s.flow_api_key, 340, "*"),
                  ("端口（重启生效）", "port", s.port, 100, None),
                  ("同时转发给 Flow 的任务数（重启生效）", "max_parallel_jobs", s.max_parallel_jobs, 100, None),
-                 ("一张卡片一次最多生成（1–8 张）", "max_count", s.max_count, 100, None),
+                 ("每个用户同时生成的张数上限（重启生效）", "user_concurrency", s.user_concurrency, 100, None),
                  ("任务超时（分钟）", "job_timeout", round(s.job_timeout / 60, 1), 100, None),
                  ("上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100, None),
                  ("关闭的模型（key，逗号分隔）", "disabled_models", ", ".join(s.disabled_models), 340, None)]
@@ -370,16 +370,16 @@ class Console:
             try:
                 vals = {
                     "port": int(f2["port"].get()), "max_parallel_jobs": max(1, int(f2["max_parallel_jobs"].get())),
-                    "max_count": max(1, min(8, int(f2["max_count"].get()))),
+                    "user_concurrency": max(1, min(64, int(f2["user_concurrency"].get()))),
                     "job_timeout": max(60.0, float(f2["job_timeout"].get()) * 60),
                     "max_upload_bytes": max(1, int(float(f2["max_upload_mb"].get()))) * 1048576,
                 }
             except ValueError:
-                messagebox.showerror("设置", "端口、任务数、张数、超时、上传上限都需要是数字", parent=win)
+                messagebox.showerror("设置", "端口、任务数、并发张数、超时、上传上限都需要是数字", parent=win)
                 return
             before = {k: getattr(self.settings, k) for k in self.NEED_RESTART}
             raw.update(flow_base_url=f2["flow_base_url"].get().strip(), flow_api_key=f2["flow_api_key"].get().strip(),
-                       port=vals["port"], max_parallel_jobs=vals["max_parallel_jobs"], max_count=vals["max_count"],
+                       port=vals["port"], max_parallel_jobs=vals["max_parallel_jobs"], user_concurrency=vals["user_concurrency"],
                        job_timeout=vals["job_timeout"], max_upload_bytes=vals["max_upload_bytes"],
                        disabled_models=[m.strip() for m in f2["disabled_models"].get().split(",") if m.strip()])
             comfy = dict(cf)
@@ -390,6 +390,7 @@ class Console:
                                                         if k.startswith(eng + ".") and box.get().strip()}}
             raw["comfyui"] = comfy
             raw["resolutions"] = res
+            raw.pop("max_count", None)
             raw.pop("disabled_sizes", None)     # superseded by the "关闭" choice
             cfg_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
             new = load_settings()

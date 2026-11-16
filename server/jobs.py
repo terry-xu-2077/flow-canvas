@@ -53,9 +53,16 @@ class JobRunner:
         self.store = store
         self.flow = flow
         self._sem = asyncio.Semaphore(max(1, settings.max_parallel_jobs))
+        self._user_sems: dict[str, asyncio.Semaphore] = {}   # per-user concurrency gate
         self._tasks: dict[str, asyncio.Task] = {}
         self._comfy_sem = asyncio.Semaphore(1)   # one GPU job at a time
         self._comfy: Optional[ComfyClient] = None
+
+    def _user_sem(self, user: str) -> asyncio.Semaphore:
+        sem = self._user_sems.get(user)
+        if sem is None:
+            sem = self._user_sems[user] = asyncio.Semaphore(max(1, self.settings.user_concurrency))
+        return sem
 
     def _estimates(self, target: Optional[int]) -> tuple[float, float]:
         """Typical seconds of the Flow step and of the enlarge step to `target`, from the latest finished jobs."""
@@ -112,7 +119,7 @@ class JobRunner:
         if not job:
             return
         try:
-            async with self._sem:
+            async with self._user_sem(job["user"]), self._sem:
                 self.store.update_job(job_id, status="running", started=time.time(), progress="准备中…")
                 est_f, est_u = self._estimates(job["extra"].get("upscale_to"))
                 job["extra"].update(est_flow=est_f, est_up=est_u)

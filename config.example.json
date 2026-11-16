@@ -5,5 +5,5 @@
   "port": 8870,
   "disabled_models": [],
   "disabled_sizes": [],
-  "max_count": 4
+  "user_concurrency": 4
 }

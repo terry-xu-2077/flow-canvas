@@ -42,13 +42,13 @@ TerryFlow.bat                           # 一键：拉取更新 → 检查/部�
 {
   "disabled_models": ["gemini-3.1-flash-lite-image"],
   "disabled_sizes": ["4K"],
-  "max_count": 2
+  "user_concurrency": 2
 }
 ```
 
 - `disabled_models`：按模型系列 key 关闭模型（key 见 `/api/models`），界面里不再显示，接口也会拒绝。
 - `disabled_sizes`：关闭分辨率（`"1K"` / `"2K"` / `"4K"` / `"6K"`）。也可以在控制台“设置”里把某个分辨率的来源设为“关闭”。
-- `max_count`：一张卡片一次最多生成几张（1–8，默认 4）。
+- `user_concurrency`：每个用户同时生成的张数上限（跨所有卡片，默认 4）；超出的任务在队列里等待。
 - 改完重启服务生效；画板里已经选了被关闭选项的卡片，打开时会自动改成可用的值。
 
 ## ComfyUI 放大（可选）
