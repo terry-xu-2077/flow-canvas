@@ -30,6 +30,7 @@ export interface ImageData extends Record<string, unknown> {
   // a placeholder while its job runs (the node is filled in place when the image is ready)
   pending?: boolean
   jobId?: string
+  upscale?: boolean // the placeholder belongs to an enlarge job (not to a generation card)
   status?: string
   progress?: string
   error?: string | null

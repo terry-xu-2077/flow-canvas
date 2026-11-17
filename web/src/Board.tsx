@@ -25,8 +25,10 @@ const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.
 const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
 // images made by a generation card are larger than the default image size (about the size users resized them to)
 const RESULT_WIDTH = 540
-/** A result card is 540 px wide up to 2K; bigger pictures (4K, 6K) get a proportionally bigger card. */
-const resultWidth = (w: number, h: number) => Math.round(RESULT_WIDTH * Math.max(1, Math.max(w, h) / 2752))
+/** No image card is ever wider than this: a 6K or enlarged result must stay easy to grab and resize on the canvas. */
+const MAX_CARD_WIDTH = 720
+/** A result card is 540 px wide up to 2K; bigger pictures (4K, 6K) get a somewhat bigger card, capped at MAX_CARD_WIDTH. */
+const resultWidth = (w: number, h: number) => Math.min(MAX_CARD_WIDTH, Math.round(RESULT_WIDTH * Math.max(1, Math.max(w, h) / 2752)))
 const resultHeight = (w: number, h: number, width = RESULT_WIDTH) => Math.round((width * h) / w)
 const SIZE_LONG: Record<string, number> = { '1K': 1376, '2K': 2752, '4K': 4096, '6K': 6144 }
 const ratioSize = (ratio: string): [number, number] => {
@@ -178,6 +180,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const loadedNodes = ((d.nodes || []) as CanvasNode[]).map(n => {
         const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : n.type === 'refset' ? REFSET_WIDTH : GEN_WIDTH)
         const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? 220 : GEN_HEIGHT)
+        // image cards that grew huge (older enlarge results) are brought back to a size that can be grabbed
+        if (n.type === 'image' && width > 1000 && n.data.w && n.data.h) {
+          return { ...n, width: MAX_CARD_WIDTH, height: Math.round((MAX_CARD_WIDTH * n.data.h) / n.data.w) } as CanvasNode
+        }
         return { ...n, width, height } as CanvasNode
       })
       const loadedEdges = (d.edges || []) as Edge[]
@@ -701,7 +707,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       })
       setNodes(ns => [
         ...ns.map(n => (n.id === genId ? ({ ...n, data: {
-          ...n.data, jobs: ids.map<JobState>(id => ({ id, status: 'queued', progress: '' })),
+          // earlier batches that are still running stay in the list so their results keep landing on their cards
+          ...n.data, jobs: [...(n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)), ...ids.map<JobState>(id => ({ id, status: 'queued', progress: '' }))],
           handled: [...(n as GenNodeType).data.handled, ...ids],
           notice: dropped ? `提示词里有 ${dropped} 处引用的参考图已不存在，提交时已忽略` : '',
         } } as CanvasNode) : n)),
@@ -709,7 +716,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       ])
       setEdges(es => [...es, ...placeholders.map(p => ({ ...edgeBase, id: `out_${p.data.jobId}`, source: genId, target: p.id, className: 'out' } as Edge))])
     } catch (e) {
-      patchNode(genId, { jobs: [{ id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
+      const keep = ((nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined)?.data.jobs ?? []).filter(j => !FINAL.has(j.status))
+      patchNode(genId, { jobs: [...keep, { id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
     }
   }, [boardId, patchNode, setNodes, setEdges])
 
@@ -724,7 +732,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const spot = findFree(nodesRef.current, src.position.x + width + 110, src.position.y, width, height + 40)
       const ph: ImageNodeType = {
         id: `img_${jobId}`, type: 'image', position: spot, width, height,
-        data: { assetId: '', w: src.data.w, h: src.data.h, prompt: src.data.prompt, pending: true, jobId, status: 'queued', progress: '放大排队中…' },
+        data: { assetId: '', w: src.data.w, h: src.data.h, prompt: src.data.prompt, pending: true, upscale: true, jobId, status: 'queued', progress: '放大排队中…' },
       }
       setNodes(ns => [...ns, ph])
       setEdges(es => [...es, { ...edgeBase, id: `out_${jobId}`, source: src.id, target: ph.id, className: 'out' } as Edge])
@@ -744,7 +752,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       if (info.status === 'done' && info.result_asset) {
         const w = info.result_w || d.w, h = info.result_h || d.h
         // the card grows with the pixels: the same on-screen scale as the picture it came from
-        const width = Math.round((n.width ?? IMAGE_WIDTH) * (Math.max(w, h) / Math.max(d.w, d.h)))
+        const width = Math.min(MAX_CARD_WIDTH, Math.round((n.width ?? IMAGE_WIDTH) * (Math.max(w, h) / Math.max(d.w, d.h))))
         return { ...n, width, height: Math.round((width * h) / w), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
       }
       return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
@@ -813,8 +821,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   useEffect(() => {
     if (!loaded) return
     const tick = async () => {
-      const upIds = nodesRef.current.flatMap(n => (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId
-        && !nodesRef.current.some(g => g.type === 'gen' && (g as GenNodeType).data.jobs.some(j => j.id === (n as ImageNodeType).data.jobId))
+      const upIds = nodesRef.current.flatMap(n => (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.upscale && (n as ImageNodeType).data.jobId
         ? [(n as ImageNodeType).data.jobId as string] : []))
       const pending = [...nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : []))
         .filter(j => !FINAL.has(j.status)).map(j => j.id), ...upIds]
