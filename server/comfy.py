@@ -36,7 +36,7 @@ class ComfyClient:
         self.base = base_url.rstrip("/")
         self.poll = poll
         self.client_id = uuid.uuid4().hex
-        self._http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(30.0, read=300.0))
+        self._http = httpx.AsyncClient(transport=transport, trust_env=False, timeout=httpx.Timeout(30.0, read=300.0))
 
     async def close(self) -> None:
         await self._http.aclose()

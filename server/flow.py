@@ -1,9 +1,11 @@
 """Async client for the flow2api OpenAI-compatible gateway (image generation only)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
+import uuid
 from typing import Awaitable, Callable, Optional
 from urllib.parse import urlsplit
 
@@ -21,10 +23,17 @@ MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 CAPTCHA_RE = re.compile(r"打码|验证码|reCAPTCHA|captcha", re.I)
 PICTURE_TAG_RE = re.compile(r"<Picture\s+(\d+)>(?=([0-9A-Za-z])?)", re.I)
 CACHE_TTL = 600.0
+NET_RETRIES = 2          # short retries for small calls (e.g. downloading the result)
+RECONNECT_WINDOW = 900.0  # how long a generation keeps trying to re-attach after the link drops
+GATEWAY_CODES = (502, 503, 504)  # a proxy/gateway in between, not flow2api answering
 
 
 class FlowError(Exception):
     pass
+
+
+class _GatewayError(Exception):
+    """502/503/504 while submitting: the gateway in front of flow2api, worth retrying."""
 
 
 def _is_error_line(line: str) -> bool:
@@ -88,7 +97,7 @@ class FlowClient:
         self.base = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self._http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(30.0, read=timeout))
+        self._http = httpx.AsyncClient(transport=transport, trust_env=False, timeout=httpx.Timeout(30.0, read=timeout))
         self._catalog: Optional[tuple[float, list[dict]]] = None
         self._usage: Optional[tuple[float, dict]] = None
 
@@ -151,7 +160,35 @@ class FlowClient:
 
     async def generate(self, model: str, prompt: str, ref_ids: list[str],
                        on_progress: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
-        """Run one image generation, return the result image URL."""
+        """Run one image generation, return the result image URL.
+
+        A dropped connection is not a failed job, but flow2api cannot return a result later, so the
+        recovery is to resubmit (a URL that already streamed before the drop is used as is).
+        Every attempt carries the same X-Request-Id: a flow2api that supports it re-attaches to the
+        running task instead of generating (and charging) again; an older one just generates again.
+        """
+        rid = uuid.uuid4().hex
+        first_fail: Optional[float] = None
+        attempt = 0
+        while True:
+            try:
+                return await self._generate_once(model, prompt, ref_ids, on_progress, rid)
+            except httpx.TransportError as e:
+                err = type(e).__name__
+            except _GatewayError as e:
+                err = f"HTTP {e}"
+            now = time.monotonic()
+            first_fail = first_fail if first_fail is not None else now
+            if now - first_fail > RECONNECT_WINDOW:
+                raise FlowError(f"网络连接中断，{int(RECONNECT_WINDOW // 60)} 分钟内未能恢复：{err}")
+            attempt += 1
+            if on_progress:
+                await on_progress(f"网络波动，等待连接恢复后取回结果…（{err}，第 {attempt} 次重连）")
+            await asyncio.sleep(min(3.0 * attempt, 15.0))
+
+    async def _generate_once(self, model: str, prompt: str, ref_ids: list[str],
+                             on_progress: Optional[Callable[[str], Awaitable[None]]] = None,
+                             request_id: Optional[str] = None) -> str:
         if ref_ids:
             content: list | str = [{"type": "text", "text": prompt}] + [
                 {"type": "image_url", "image_url": {"url": f"ref://{rid}"}} for rid in ref_ids]
@@ -159,55 +196,62 @@ class FlowClient:
             content = prompt
         body = {"model": model, "messages": [{"role": "user", "content": content}], "stream": True}
         text, errors, last = "", [], ""
-        async with self._http.stream(
-                "POST", self.base + "/v1/chat/completions", json=body,
-                headers=self._headers({"Accept": "text/event-stream"})) as resp:
-            if resp.status_code >= 400:
-                detail = (await resp.aread()).decode("utf-8", "replace")[:300]
-                raise FlowError(f"生成请求被拒绝 HTTP {resp.status_code}: {_error_message(detail)}")
-            async for raw in resp.aiter_lines():
-                line = raw.strip()
-                if not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                if obj.get("error"):
-                    err = obj["error"]
-                    errors.append(str(err.get("message") if isinstance(err, dict) else err))
-                    continue
-                status = obj.get("status")
-                if isinstance(status, dict) and status.get("code"):
-                    # newer flow2api: a message code + params, formatted here (the text in the same chunk is ignored)
-                    kind, shown = format_status(str(status["code"]), status.get("params"))
-                    if kind == "error":
-                        errors.append(shown)
-                    elif shown and shown != last:
-                        last = shown
-                        if on_progress:
-                            await on_progress(shown)
-                    continue
-                for ch in obj.get("choices") or []:
-                    delta = ch.get("delta") or ch.get("message") or {}
-                    piece = (delta.get("content") or "") + (delta.get("reasoning_content") or "")
-                    if not piece:
+        try:
+            async with self._http.stream(
+                    "POST", self.base + "/v1/chat/completions", json=body,
+                    headers=self._headers({"Accept": "text/event-stream", **({"X-Request-Id": request_id} if request_id else {})})) as resp:
+                if resp.status_code in GATEWAY_CODES:
+                    raise _GatewayError(resp.status_code)
+                if resp.status_code >= 400:
+                    detail = (await resp.aread()).decode("utf-8", "replace")[:300]
+                    raise FlowError(f"生成请求被拒绝 HTTP {resp.status_code}: {_error_message(detail)}")
+                async for raw in resp.aiter_lines():
+                    line = raw.strip()
+                    if not line.startswith("data:"):
                         continue
-                    text += piece
-                    for ln in piece.splitlines():
-                        ln = ln.strip()
-                        if not ln:
-                            continue
-                        if _is_error_line(ln):
-                            errors.append(ln)
-                        elif not URL_RE.search(ln):
-                            shown = friendly_progress(ln)
-                            if on_progress and shown and shown != last:
-                                last = shown
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if obj.get("error"):
+                        err = obj["error"]
+                        errors.append(str(err.get("message") if isinstance(err, dict) else err))
+                        continue
+                    status = obj.get("status")
+                    if isinstance(status, dict) and status.get("code"):
+                        # newer flow2api: a message code + params, formatted here (the text in the same chunk is ignored)
+                        kind, shown = format_status(str(status["code"]), status.get("params"))
+                        if kind == "error":
+                            errors.append(shown)
+                        elif shown and shown != last:
+                            last = shown
+                            if on_progress:
                                 await on_progress(shown)
+                        continue
+                    for ch in obj.get("choices") or []:
+                        delta = ch.get("delta") or ch.get("message") or {}
+                        piece = (delta.get("content") or "") + (delta.get("reasoning_content") or "")
+                        if not piece:
+                            continue
+                        text += piece
+                        for ln in piece.splitlines():
+                            ln = ln.strip()
+                            if not ln:
+                                continue
+                            if _is_error_line(ln):
+                                errors.append(ln)
+                            elif not URL_RE.search(ln):
+                                shown = friendly_progress(ln)
+                                if on_progress and shown and shown != last:
+                                    last = shown
+                                    await on_progress(shown)
+        except httpx.TransportError:
+            if not (MD_IMG_RE.findall(text) or URL_RE.findall(text)):
+                raise
+            # the image URL had already arrived before the connection dropped
         urls = MD_IMG_RE.findall(text) or URL_RE.findall(text)
         if not urls:
             raise FlowError("；".join(errors) or text.strip()[-200:] or "生成服务没有返回结果")
@@ -216,7 +260,14 @@ class FlowClient:
     async def download(self, url: str) -> bytes:
         url = self.fix_url(url)
         headers = self._headers() if url.startswith(self.base) else None
-        r = await self._http.get(url, headers=headers, timeout=120)
+        for attempt in range(NET_RETRIES + 1):
+            try:
+                r = await self._http.get(url, headers=headers, timeout=120)
+                break
+            except httpx.TransportError:
+                if attempt == NET_RETRIES:
+                    raise FlowError("下载结果时网络中断，请重试")
+                await asyncio.sleep(2.0 * (attempt + 1))
         if r.status_code >= 400:
             raise FlowError(f"下载结果失败 HTTP {r.status_code}")
         return r.content

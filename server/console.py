@@ -303,7 +303,7 @@ class Console:
             names = {"UNETLoader": "unet_name", "VAELoader": "vae_name", "CLIPLoader": "clip_name"}
             out: dict[str, list[str]] = {}
             try:
-                with httpx.Client(timeout=6) as c:
+                with httpx.Client(timeout=6, trust_env=False) as c:
                     r = c.get(target + "/system_stats")
                     r.raise_for_status()
                     ver = r.json().get("system", {}).get("comfyui_version", "?")
@@ -475,21 +475,34 @@ class Console:
 
     # ---- data
     def flow_loop(self) -> None:
-        s = self.settings
-        headers = {"Authorization": f"Bearer {s.flow_api_key}"}
+        """Poll flow2api. A single failed poll is network noise (flow2api is often busy generating),
+        so the last good reading is kept until several polls in a row fail."""
+        fails = 0
         while True:
+            s = self.settings
+            headers = {"Authorization": f"Bearer {s.flow_api_key}"}
             try:
-                s = self.settings
-                headers = {"Authorization": f"Bearer {s.flow_api_key}"}
-                with httpx.Client(timeout=8) as c:
+                with httpx.Client(timeout=15, trust_env=False) as c:
                     h = c.get(s.flow_base_url + "/health")
                     h.raise_for_status()
-                    u = c.get(s.flow_base_url + "/v1/usage", headers=headers)
-                    u.raise_for_status()
-                    self.flow = {"usage": u.json(), "health": h.json(), "error": ""}
+                    health = h.json()
+                    try:  # credits are secondary: a failure here must not mark the backend as down
+                        u = c.get(s.flow_base_url + "/v1/usage", headers=headers)
+                        u.raise_for_status()
+                        usage = u.json()
+                    except Exception:
+                        usage = self.flow.get("usage")
+                    self.flow = {"usage": usage, "health": health, "error": ""}
+                fails = 0
             except Exception as exc:
-                self.flow = {"usage": None, "health": None, "error": type(exc).__name__}
-            time.sleep(10)
+                fails += 1
+                if isinstance(exc, httpx.HTTPStatusError):
+                    err = f"HTTP {exc.response.status_code}"
+                else:
+                    err = type(exc).__name__
+                if fails >= 3 or self.flow.get("health") is None:
+                    self.flow = {"usage": None, "health": None, "error": err}
+            time.sleep(3 if fails else 10)
 
     def query(self) -> tuple[list, list]:
         midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
