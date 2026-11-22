@@ -8,15 +8,17 @@ import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo, type UpscaleInfo, type UpscaleOption } from './api'
 import { CanvasContext } from './CanvasContext'
 import { copyAssetImage, imageFromHtml, recallCopied, rememberCopied } from './clipboard'
-import { BananaIcon, BrandMark, CollectionIcon, ImageIcon } from './icons'
+import { BananaIcon, BrandMark, CollectionIcon, ImageIcon, VideoIcon } from './icons'
 import { nodeTypes } from './nodes'
+import { pickQuality } from './quality'
 import { edgeTypes } from './DeletableEdge'
 import UsageBadge from './UsageBadge'
+import CloudBadge from './CloudBadge'
 import { UserMenu } from './UserMenu'
 import { Library } from './Library'
 import type { RefInfo } from './PromptEditor'
 import {
-  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
+  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, VIDEO_WIDTH, type VGenNodeType, type VideoNodeType, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
 } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -31,6 +33,11 @@ const MAX_CARD_WIDTH = 720
 const resultWidth = (w: number, h: number) => Math.min(MAX_CARD_WIDTH, Math.round(RESULT_WIDTH * Math.max(1, Math.max(w, h) / 2752)))
 const resultHeight = (w: number, h: number, width = RESULT_WIDTH) => Math.round((width * h) / w)
 const SIZE_LONG: Record<string, number> = { '1K': 1376, '2K': 2752, '4K': 4096, '6K': 6144 }
+/** Aspect of a video card's ratio setting; "adaptive" and the like fall back to 16:9. */
+const videoRatio = (ratio: string): [number, number] => {
+  const [w, h] = ratio.split(':').map(Number)
+  return w > 0 && h > 0 ? [w, h] : [16, 9]
+}
 const ratioSize = (ratio: string): [number, number] => {
   const [w, h] = ratio.split(':').map(Number)
   return w > 0 && h > 0 ? [w, h] : [1, 1]
@@ -40,6 +47,10 @@ function nodeBox(n: CanvasNode) {
   const w = n.width ?? n.measured?.width
   if (n.type === 'image') {
     const width = w ?? IMAGE_WIDTH
+    return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
+  }
+  if (n.type === 'video') {
+    const width = w ?? VIDEO_WIDTH
     return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
   }
   if (n.type === 'refset') return { w: w ?? REFSET_WIDTH, h: n.height ?? n.measured?.height ?? 200 }
@@ -136,6 +147,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const modelsRef = useRef<ModelInfo[]>([])
+  const submittingRef = useRef<Set<string>>(new Set())   // cards whose 生成 request is still on its way
+  const [submitting, setSubmitting] = useState<ReadonlySet<string>>(new Set())
+  modelsRef.current = models
   const [maxCount, setMaxCount] = useState(4)
   const [upscale, setUpscale] = useState<UpscaleInfo>({ enabled: false, options: [] })
   const [modelError, setModelError] = useState('')
@@ -178,8 +193,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const d = b.data || {}
       // Boards saved before nodes were resizable have no stored size: give them the default one.
       const loadedNodes = ((d.nodes || []) as CanvasNode[]).map(n => {
-        const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : n.type === 'refset' ? REFSET_WIDTH : GEN_WIDTH)
-        const height = n.height ?? (n.type === 'image' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? 220 : GEN_HEIGHT)
+        const width = n.width ?? (n.type === 'image' ? IMAGE_WIDTH : n.type === 'video' ? VIDEO_WIDTH : n.type === 'refset' ? REFSET_WIDTH : GEN_WIDTH)
+        const height = n.height ?? (n.type === 'image' || n.type === 'video' ? Math.round((width * n.data.h) / n.data.w) : n.type === 'refset' ? 220 : GEN_HEIGHT)
         // image cards that grew huge (older enlarge results) are brought back to a size that can be grabbed
         if (n.type === 'image' && width > 1000 && n.data.w && n.data.h) {
           return { ...n, width: MAX_CARD_WIDTH, height: Math.round((MAX_CARD_WIDTH * n.data.h) / n.data.w) } as CanvasNode
@@ -229,7 +244,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const next = ns.map(n => {
         if (n.type !== 'gen') return n
         const d = (n as GenNodeType).data
-        const m = models.find(x => x.key === d.model) ?? models[0]
+        const m = models.find(x => x.key === d.model) ?? models.find(x => x.legacy === d.model || (d.model === 'gpt-image' && x.provider === 'chatgpt')) ?? models[0]
         const ratio = m.ratios.includes(d.ratio) ? d.ratio : (m.ratios.includes('16:9') ? '16:9' : m.ratios[0])
         const size = m.sizes.includes(d.size) ? d.size : m.sizes[0]
         const count = Math.min(Math.max(1, d.count || 1), maxCount)
@@ -246,7 +261,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     if (!loaded) return
     const updates = new Map<string, { refIds: string[]; prompt: string }>()
     for (const n of nodes) {
-      if (n.type !== 'gen') continue
+      if (n.type !== 'gen' && n.type !== 'vgen') continue
       const known = (n as GenNodeType).data.refIds
       const keys = collectRefs(n.id, nodes, edges).map(r => r.key)
       const fresh = keys.filter(k => !(known ?? []).includes(k))
@@ -310,7 +325,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const fed = new Set(edgesRef.current.filter(e => e.source === id).map(e => e.target))
       return ns.map(n => {
         if (n.id === id) return { ...n, data: { ...n.data, slots } } as CanvasNode
-        if (!reordered || n.type !== 'gen' || !fed.has(n.id)) return n
+        if (!reordered || (n.type !== 'gen' && n.type !== 'vgen') || !fed.has(n.id)) return n
         const ids = (n as GenNodeType).data.refIds
         if (!ids) return n
         const mine = ids.map((k, i) => (oldKeys.includes(k) ? i : -1)).filter(i => i >= 0)
@@ -339,6 +354,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       },
     }
   }, [models])
+
+  const newVideoGenNode = useCallback((x: number, y: number): VGenNodeType => ({
+    id: uid('v'), type: 'vgen', position: { x, y }, width: GEN_WIDTH, height: GEN_HEIGHT,
+    data: { prompt: '', model: '', ratio: '16:9', resolution: '', duration: 0, sound: true, mode: 'auto', count: 1, jobs: [], handled: [] },
+  }), [])
 
   const newImageNode = (assetId: string, w: number, h: number, x: number, y: number, prompt?: string): ImageNodeType => ({
     id: uid('i'), type: 'image', position: { x, y }, width: IMAGE_WIDTH, height: imgHeight(w, h), data: { assetId, w, h, prompt },
@@ -369,7 +389,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const node: RefsetNodeType = { id: uid('r'), type: 'refset', position: spot, width: REFSET_WIDTH, height: 220, data: { slots } }
     setNodes(ns => [
       ...ns.filter(n => !gone.has(n.id)).map(n => {
-        if (n.type === 'gen' && n.data.refIds) return { ...n, selected: false, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode
+        if ((n.type === 'gen' || n.type === 'vgen') && n.data.refIds) return { ...n, selected: false, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode
         return n.selected ? { ...n, selected: false } : n
       }),
       { ...node, selected: true } as CanvasNode,
@@ -405,7 +425,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       keyMap[`s:${s.id}`] = `n:${node.id}`
     })
     setNodes(ns => [
-      ...ns.filter(n => n.id !== id).map(n => (n.type === 'gen' && n.data.refIds
+      ...ns.filter(n => n.id !== id).map(n => ((n.type === 'gen' || n.type === 'vgen') && n.data.refIds
         ? ({ ...n, data: { ...n.data, refIds: n.data.refIds.map(k => keyMap[k] ?? k) } } as CanvasNode) : n)),
       ...created.map(n => ({ ...n, selected: false })),
     ])
@@ -429,10 +449,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     for (const o of src) {
       const b = nodeBox(o)
       const pos = at?.[o.id] ?? findFree([...nodesRef.current, ...placed], o.position.x + b.w + 40, o.position.y, b.w, b.h)
-      const { prompt, model, ratio, size, count, refIds, onlyRefs } = o.data
+      const { prompt, model, ratio, size, quality, count, refIds, onlyRefs } = o.data
       const copy: GenNodeType = {
         id: uid('g'), type: 'gen', position: pos, width: o.width ?? b.w, height: o.height ?? b.h, selected: !keepSelection,
-        data: { prompt, model, ratio, size, count, jobs: [], handled: [], refIds: refIds ? [...refIds] : undefined, onlyRefs },
+        data: { prompt, model, ratio, size, quality, count, jobs: [], handled: [], refIds: refIds ? [...refIds] : undefined, onlyRefs },
       }
       made[o.id] = copy.id
       placed.push(copy)
@@ -485,6 +505,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const spot = findFree(nodesRef.current, center.x - GEN_WIDTH / 2, center.y - GEN_EST_HEIGHT / 2, GEN_WIDTH, GEN_EST_HEIGHT)
     setNodes(ns => [...ns, newGenNode(spot.x, spot.y)])
   }, [rf, setNodes, newGenNode])
+
+  const addVideoCard = useCallback(() => {
+    const el = document.querySelector('.react-flow')?.getBoundingClientRect()
+    const center = rf.screenToFlowPosition({ x: (el?.left ?? 0) + (el?.width ?? 800) / 2, y: (el?.top ?? 0) + (el?.height ?? 600) / 2 })
+    const spot = findFree(nodesRef.current, center.x - GEN_WIDTH / 2, center.y - GEN_EST_HEIGHT / 2, GEN_WIDTH, GEN_EST_HEIGHT)
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...newVideoGenNode(spot.x, spot.y), selected: true }] as CanvasNode[])
+  }, [rf, setNodes, newVideoGenNode])
 
   // ---- uploads (button, drag & drop, paste)
   const addToRefset = useCallback(async (id: string, files: File[]) => {
@@ -585,9 +612,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     // a result placeholder (or a card with running jobs) that is deleted must not keep queueing: the server drops those jobs
     for (const n of ns) {
       if (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId) void api.cancelJob((n as ImageNodeType).data.jobId!)
-      if (n.type === 'gen') (n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
+      if (n.type === 'video' && n.data.pending && n.data.jobId) void api.cancelJob(n.data.jobId)
+      if (n.type === 'gen' || n.type === 'vgen') (n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
     }
-    undoStack.current = [...undoStack.current.slice(-29), { nodes: ns.filter(n => !(n.type === 'image' && (n as ImageNodeType).data.pending)), edges: es }]
+    undoStack.current = [...undoStack.current.slice(-29), { nodes: ns.filter(n => !((n.type === 'image' || n.type === 'video') && n.data.pending)), edges: es }]
     showToast(ns.length ? `已删除 ${ns.length} 个节点，Ctrl+Z 撤销` : '已删除连线，Ctrl+Z 撤销')
   }, [showToast])
   const undoDelete = useCallback(() => {
@@ -647,12 +675,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       if (k === 'a') { e.preventDefault(); addGenCard() }
       else if (k === 'u') { e.preventDefault(); fileInput.current?.click() }
       else if (k === 'r') { e.preventDefault(); addRefset() }
+      else if (k === 'v') { e.preventDefault(); addVideoCard() }
       else if (k === 'f') { e.preventDefault(); fitAll() }
       else if (k === 'l') { e.preventDefault(); setLayersOpen(o => !o) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [addGenCard, addRefset, fitAll, previewId, cloneGens, undoDelete])
+  }, [addGenCard, addRefset, addVideoCard, fitAll, previewId, cloneGens, undoDelete])
 
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[]) => {
@@ -690,9 +719,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       return `<Picture ${p}>`
     })
     try {
+      // what the card shows is what is sent: a model / size / quality this user may not use falls back to the first allowed one
+      const m = modelsRef.current.find(x => x.key === node.data.model) ?? modelsRef.current.find(x => x.legacy === node.data.model) ?? modelsRef.current[0]
+      const size = m?.sizes.includes(node.data.size) ? node.data.size : (m?.sizes[0] ?? node.data.size)
+      const quality = pickQuality(m, size, node.data.quality)
       const ids = await api.createJobs({
-        board: boardId, node: genId, model: node.data.model, ratio: node.data.ratio, size: node.data.size,
-        prompt, refs, count: node.data.count,
+        board: boardId, node: genId, model: m?.key ?? node.data.model, ratio: node.data.ratio, size,
+        prompt, refs, count: node.data.count, quality,
       })
       const [rw, rh] = ratioSize(node.data.ratio)
       const pw = resultWidth(SIZE_LONG[node.data.size] ?? 2752, 0)
@@ -720,6 +753,96 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       patchNode(genId, { jobs: [...keep, { id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
     }
   }, [boardId, patchNode, setNodes, setEdges])
+
+  // New video card wired to the chosen images (1 = first frame, 2 = first + last frame, more = references).
+  const continueVideo = useCallback((imageIds: string[]) => {
+    const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
+    if (!images.length) return
+    const x = Math.max(...images.map(i => i.position.x)) + IMAGE_WIDTH + 120
+    const y = images.reduce((s, i) => s + i.position.y, 0) / images.length
+    const spot = findFree(nodesRef.current, x, y, GEN_WIDTH, GEN_EST_HEIGHT)
+    const card = newVideoGenNode(spot.x, spot.y)
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...card, selected: true }] as CanvasNode[])
+    setEdges(es => [...es, ...images.map(img => ({ ...edgeBase, id: uid('e'), source: img.id, target: card.id } as Edge))])
+  }, [newVideoGenNode, setNodes, setEdges])
+
+  const generateVideo = useCallback(async (genId: string) => {
+    const node = nodesRef.current.find(n => n.id === genId) as VGenNodeType | undefined
+    if (!node) return
+    // same numbering rules as the image card: pictures go out in number order and <Picture N> is renumbered to match
+    const numbered = numberedRefs(node.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
+    const refs: string[] = []
+    const position: Record<number, number> = {}
+    const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
+    numbered.forEach((r, i) => {
+      if (!r) return
+      if (node.data.onlyRefs && !mentioned.has(i + 1)) return
+      let p = refs.indexOf(r.assetId)
+      if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
+      position[i + 1] = p + 1
+    })
+    let dropped = 0
+    const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
+      const p = position[Number(n)]
+      if (!p) { dropped++; return '' }
+      return `<Picture ${p}>`
+    })
+    if (!prompt && !refs.length) return
+    try {
+      const ids = await api.createVideoJobs({
+        board: boardId, node: genId, model: node.data.model, prompt, ratio: node.data.ratio, resolution: node.data.resolution,
+        duration: node.data.duration, sound: node.data.sound, mode: node.data.mode, refs, count: node.data.count,
+      })
+      const [rw, rh] = videoRatio(node.data.ratio)
+      const pw = VIDEO_WIDTH, ph = Math.round((pw * rh) / rw)
+      const placeholders: VideoNodeType[] = []
+      ids.forEach(jobId => {
+        const spot = findFree([...nodesRef.current, ...placeholders], node.position.x + (node.width ?? GEN_WIDTH) + 110, node.position.y, pw, ph + 40)
+        placeholders.push({
+          id: `vid_${jobId}`, type: 'video', position: spot, width: pw, height: ph,
+          data: { assetId: '', w: rw, h: rh, prompt: node.data.prompt, pending: true, jobId, status: 'queued', progress: '' },
+        })
+      })
+      setNodes(ns => [
+        ...ns.map(n => (n.id === genId ? ({ ...n, data: {
+          ...n.data, jobs: [...(n as VGenNodeType).data.jobs.filter(j => !FINAL.has(j.status)), ...ids.map<JobState>(id => ({ id, status: 'queued', progress: '' }))],
+          handled: [...(n as VGenNodeType).data.handled, ...ids],
+          notice: dropped ? `提示词里有 ${dropped} 处引用的参考图已不存在，提交时已忽略` : '',
+        } } as CanvasNode) : n)),
+        ...placeholders,
+      ])
+      setEdges(es => [...es, ...placeholders.map(p => ({ ...edgeBase, id: `out_${p.data.jobId}`, source: genId, target: p.id, className: 'out' } as Edge))])
+    } catch (e) {
+      const keep = ((nodesRef.current.find(n => n.id === genId) as VGenNodeType | undefined)?.data.jobs ?? []).filter(j => !FINAL.has(j.status))
+      patchNode(genId, { jobs: [...keep, { id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
+    }
+  }, [boardId, patchNode, setNodes, setEdges])
+
+  // Job updates of video cards: the placeholder next to the card is filled in place with the finished video.
+  const applyVideoUpdates = useCallback((updates: JobInfo[]) => {
+    let next = nodesRef.current
+    const removed = new Set<string>()
+    for (const info of updates) {
+      const idx = next.findIndex(n => n.id === info.node)
+      if (idx < 0) continue
+      const card = next[idx] as VGenNodeType
+      const jobs = card.data.jobs.map(j => (j.id === info.id ? { id: j.id, status: info.status, progress: info.progress, error: info.error } : j))
+      const vidId = `vid_${info.id}`
+      if (info.status === 'cancelled') removed.add(vidId)
+      else {
+        next = next.map(n => {
+          if (n.id !== vidId || n.type !== 'video') return n
+          const d = n.data
+          if (info.status === 'done' && info.result_asset) return { ...n, data: { assetId: info.result_asset, w: d.w, h: d.h, prompt: d.prompt, label: info.label || undefined } } as CanvasNode
+          return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
+        })
+      }
+      next = next.map((n, i) => (i === idx ? ({ ...n, data: { ...n.data, jobs } } as CanvasNode) : n))
+    }
+    if (removed.size) next = next.filter(n => !removed.has(n.id))
+    setNodes(next)
+    if (removed.size) setEdges(es => es.filter(e => !removed.has(e.target)))
+  }, [setNodes, setEdges])
 
   // ---- enlarge (ComfyUI): a placeholder next to the picture is filled in place when the job is done
   const upscaleImage = useCallback(async (nodeId: string, size: string) => {
@@ -753,7 +876,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         const w = info.result_w || d.w, h = info.result_h || d.h
         // the card grows with the pixels: the same on-screen scale as the picture it came from
         const width = Math.min(MAX_CARD_WIDTH, Math.round((n.width ?? IMAGE_WIDTH) * (Math.max(w, h) / Math.max(d.w, d.h))))
-        return { ...n, width, height: Math.round((width * h) / w), data: { assetId: info.result_asset, w, h, prompt: d.prompt } } as CanvasNode
+        return { ...n, width, height: Math.round((width * h) / w), data: { assetId: info.result_asset, w, h, prompt: d.prompt, label: info.label || undefined } } as CanvasNode
       }
       return { ...n, data: { ...d, status: info.status, progress: info.progress, error: info.error } } as CanvasNode
     }).filter(n => !gone.has(n.id)))
@@ -761,7 +884,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [setNodes, setEdges])
 
   const cancelJobs = useCallback((genId: string) => {
-    const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
+    const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | VGenNodeType | undefined
     node?.data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
   }, [])
 
@@ -823,7 +946,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     const tick = async () => {
       const upIds = nodesRef.current.flatMap(n => (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.upscale && (n as ImageNodeType).data.jobId
         ? [(n as ImageNodeType).data.jobId as string] : []))
-      const pending = [...nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : []))
+      const pending = [...nodesRef.current.flatMap(n => (n.type === 'gen' || n.type === 'vgen' ? (n as GenNodeType).data.jobs : []))
         .filter(j => !FINAL.has(j.status)).map(j => j.id), ...upIds]
       if (!pending.length) return
       try {
@@ -833,21 +956,25 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         if (upUpdates.length) applyUpscaleUpdates(upUpdates)
         const updates = all.filter(u => !mine.has(u.id))
         const changed = updates.filter(u => {
-          const cur = nodesRef.current.flatMap(n => (n.type === 'gen' ? (n as GenNodeType).data.jobs : [])).find(j => j.id === u.id)
+          const cur = nodesRef.current.flatMap(n => (n.type === 'gen' || n.type === 'vgen' ? (n as GenNodeType).data.jobs : [])).find(j => j.id === u.id)
           return cur && (cur.status !== u.status || cur.progress !== u.progress || u.status === 'done')
         })
-        if (changed.length) applyJobUpdates(changed)
+        const videoCards = new Set(nodesRef.current.filter(n => n.type === 'vgen').map(n => n.id))
+        const videoChanged = changed.filter(u => u.node && videoCards.has(u.node))
+        const imageChanged = changed.filter(u => !(u.node && videoCards.has(u.node)))
+        if (imageChanged.length) applyJobUpdates(imageChanged)
+        if (videoChanged.length) applyVideoUpdates(videoChanged)
       } catch { /* transient network error: try again next tick */ }
     }
     const t = setInterval(tick, 1500)
     return () => clearInterval(t)
-  }, [loaded, applyJobUpdates, applyUpscaleUpdates])
+  }, [loaded, applyJobUpdates, applyUpscaleUpdates, applyVideoUpdates])
 
   // ---- canvas wiring
   const isValidConnection = useCallback((c: Connection | Edge) => {
     const s = nodesRef.current.find(n => n.id === c.source)
     const t = nodesRef.current.find(n => n.id === c.target)
-    if ((s?.type !== 'image' && s?.type !== 'refset') || t?.type !== 'gen') return false
+    if ((s?.type !== 'image' && s?.type !== 'refset') || (t?.type !== 'gen' && t?.type !== 'vgen')) return false
     return !edgesRef.current.some(e => e.source === c.source && e.target === c.target)
   }, [])
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
@@ -919,9 +1046,22 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [nodes, edges])
   const refCount = useCallback((genId: string) => collectRefs(genId, nodes, edges).length, [nodes, edges])
 
+  // One request per card at a time: the button answers at once ("提交中…") and a second click while it is on its way is ignored
+  const once = useCallback((run: (id: string) => Promise<void>) => async (genId: string) => {
+    if (submittingRef.current.has(genId)) return
+    submittingRef.current.add(genId)
+    setSubmitting(new Set(submittingRef.current))
+    try { await run(genId) } finally {
+      submittingRef.current.delete(genId)
+      setSubmitting(new Set(submittingRef.current))
+    }
+  }, [])
+  const generateOnce = useMemo(() => once(generate), [once, generate])
+  const generateVideoOnce = useMemo(() => once(generateVideo), [once, generateVideo])
+
   const actions = useMemo<CanvasActions>(() => ({
-    models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, duplicate, continueFrom, preview: setPreviewId, refCount, refsOf,
-  }), [models, maxCount, patchNode, editSlots, dissolve, generate, cancelJobs, duplicate, continueFrom, refCount, refsOf])
+    submitting, models, maxCount, patchNode, editSlots, dissolve, generate: generateOnce, generateVideo: generateVideoOnce, cancelJobs, duplicate, continueFrom, preview: setPreviewId, refCount, refsOf,
+  }), [submitting, models, maxCount, patchNode, editSlots, dissolve, generateOnce, generateVideoOnce, cancelJobs, duplicate, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image' && !(n as ImageNodeType).data.pending)
   const viewport = useViewport()
@@ -987,7 +1127,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
           </Panel>
-          <Panel position="top-right" className="toolbar who"><UsageBadge /><UserMenu /></Panel>
+          <Panel position="top-right" className="toolbar who"><UsageBadge /><CloudBadge /><UserMenu /></Panel>
           {layersOpen && (
             <Panel position="top-right" className="layers">
               <div className="layers-head"><strong>图层</strong>
@@ -1001,7 +1141,11 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                         : n.type === 'refset' ? (n as RefsetNodeType).data.slots.find(s => s.assetId)?.assetId : undefined
                       const pic = thumb ? <img className="layer-thumb" src={assetUrl(thumb, 96)} alt="" draggable={false} /> : null
                       return n.type === 'gen'
-                        ? <><BananaIcon className="ico-banana" /> 生成卡片 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
+                        ? <><BananaIcon className="ico-banana" /> 图片生成 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
+                        : n.type === 'vgen'
+                        ? <><VideoIcon className="ico-banana" /> 视频生成 · {((n as VGenNodeType).data.prompt || '空').slice(0, 16)}</>
+                        : n.type === 'video'
+                        ? <><VideoIcon className="ico-image" /> {(n as VideoNodeType).data.pending ? '视频 · 生成中' : '视频'}</>
                         : n.type === 'refset'
                           ? <>{pic ?? <CollectionIcon className="ico-collection" />} 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
                           : <>{pic ?? <ImageIcon className="ico-image" />} {(n as ImageNodeType).data.pending ? '图片 · 生成中' : `图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}</>
@@ -1012,10 +1156,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             </Panel>
           )}
           <Panel position="bottom-center" className="dock">
-            <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建生成卡片（A）">
-              <BananaIcon /> 生成卡片 <kbd>A</kbd>
+            <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建图片生成卡片（A）">
+              <BananaIcon /> 图片生成 <kbd>A</kbd>
             </button>
-            <button onClick={() => addRefset()} title="新建参考集合（R）：把多张参考图放在一起，连给任意生成卡片">
+            <button onClick={addVideoCard} title="新建视频生成卡片（V）：用小云雀 / LibTV / Lovart 生成视频，可连图作为首帧、尾帧或参考图">
+              <VideoIcon /> 视频生成 <kbd>V</kbd>
+            </button>
+            <button onClick={() => addRefset()} title="新建参考集合（R）：把多张参考图放在一起，连给任意图片生成卡片">
               <CollectionIcon /> 参考集合 <kbd>R</kbd>
             </button>
             <span className="sep" />
@@ -1036,7 +1183,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
         </ReactFlow>
         {loaded && nodes.length === 0 && (
           <div className="empty">
-            点「＋ 生成卡片」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
+            点「＋ 图片生成」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
           </div>
         )}
         {libOpen && <Library onClose={() => setLibOpen(false)} onPlace={placeAsset} onPreview={setPreviewId} />}
@@ -1044,8 +1191,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
             已选 {selectedImages.length} 张图
             <button className="primary" onClick={() => continueFrom(selectedImages.map(n => n.id))}
-                    title="在右侧新建一张生成卡片，并把选中的图作为它的参考图（已连好线）">
+                    title="在右侧新建一张图片生成卡片，并把选中的图作为它的参考图（已连好线）">
               <BananaIcon />作为参考
+            </button>
+            <button onClick={() => continueVideo(selectedImages.map(n => n.id))}
+                    title="在右侧新建一张视频生成卡片，并把选中的图连上（1 张 = 首帧，2 张 = 首尾帧，更多 = 参考图）">
+              <VideoIcon />做成视频
             </button>
             {selectedImages.length === 1 && upscale.enabled && (() => {
               // the next step above the picture's current size (an image that is already 4K offers 6K, a 6K one nothing)
@@ -1060,7 +1211,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             {selectedImages.length === 1 ? (
               <a className="btn" href={downloadUrl((selectedImages[0] as ImageNodeType).data.assetId)} title="下载原图">下载</a>
             ) : (
-              <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个生成卡片">
+              <button onClick={() => mergeIntoRefset(selectedImages.map(n => n.id))} title="把选中的图放进一个参考集合，之后可一次连给多个图片生成卡片">
                 <CollectionIcon />合并为集合
               </button>
             )}

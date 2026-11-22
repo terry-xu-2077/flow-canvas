@@ -16,9 +16,28 @@ export const BananaIcon = (p: IconProps) => wrap('0 0 1024 1024', (
   <path d="M951.6 553.8c-19.8-60-65.2-104.5-37.4-161.5 10.4-21-17.5-41.5-17.5-41.5-4.8-0.6-22.7-45.2-33.1-60.7-10.8-15.8-11.7-29.6-20.3-16.1-25.1 39.2-161.9 137-304.3 71.1-142.3-65.8-183.2-162.5-213.9-200.9-30.6-38.4-58.8-55.3-68.7-48-9.7 7.2-24.5 7.1-25 16.9 0 0-40.7 122 39.8 228.3C351.8 447.6 463.1 519 581.9 520.3c10.1 0.1 19.8-0.1 29-0.6-28.9 7.5-60.6 11.2-95 9.1-189.6-11.2-279.8-97.2-331.9-125.5-51.9-28.3-91.4-34.5-98.9-22.7s-24.2 17.6-20.3 28.3c0 0 10.5 146.6 149.5 226.6 139 79.7 296.5 109.7 430.1 62 44.8-16.1 80.2-34.4 107.6-54-20.9 23.9-47.3 44.2-81.7 58.4-174.1 72.1-291.8 34.3-350.5 31.4-58.6-2.8-96.5 8.7-98.2 22.5-1.7 13.8-13.9 26.3-5.8 34.1 0 0 72.9 126.5 231.6 137.9C606 938.9 759.6 897.5 858.2 797c98.8-100.9 113.3-183.3 93.4-243.2z" />
 ), p)
 
+/** ChatGPT image model: a six-petal flower (three outlined capsules rotated by 60 degrees). */
+export const RosetteIcon = (p: IconProps) => wrap('0 0 24 24', (
+  <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+    <rect x="8.4" y="2.6" width="7.2" height="18.8" rx="3.6" />
+    <rect x="8.4" y="2.6" width="7.2" height="18.8" rx="3.6" transform="rotate(60 12 12)" />
+    <rect x="8.4" y="2.6" width="7.2" height="18.8" rx="3.6" transform="rotate(120 12 12)" />
+  </g>
+), p)
+
 /** Uploaded / generated picture. */
 export const ImageIcon = (p: IconProps) => wrap('0 0 16 16', (
   <path fillRule="evenodd" d="M3 2h10a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 3 2Zm0 1.2a.3.3 0 0 0-.3.3v5.6l2.3-2.5a.9.9 0 0 1 1.3 0l2 2.1 1.3-1.2a.9.9 0 0 1 1.2 0l2.2 2V3.5a.3.3 0 0 0-.3-.3H3Zm8.2 1.4a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+), p)
+
+/** Video generation card / video result (a clapper-free play-in-frame glyph). */
+export const VideoIcon = (p: IconProps) => wrap('0 0 24 24', (
+  <path fillRule="evenodd" d="M4 5h11a2 2 0 0 1 2 2v2.4l3.4-2a.8.8 0 0 1 1.2.7v8.8a.8.8 0 0 1-1.2.7l-3.4-2V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 1.6a.4.4 0 0 0-.4.4v10c0 .2.2.4.4.4h11c.2 0 .4-.2.4-.4V7a.4.4 0 0 0-.4-.4H4Zm5 2.3 4 3.1-4 3.1V8.9Z" />
+), p)
+
+/** Lightning bolt: credits a generation will cost. */
+export const BoltIcon = (p: IconProps) => wrap('0 0 16 16', (
+  <path d="M9.2 1 3.5 9h3.7l-.9 6 6.2-8.3H8.4L9.2 1Z" />
 ), p)
 
 /** Sparkle, used on the generate button. */

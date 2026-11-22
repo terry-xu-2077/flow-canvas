@@ -1,9 +1,10 @@
 {
-  "flow_base_url": "http://127.0.0.1:8866",
-  "flow_api_key": "<flow2api API Key>",
+  "gateway_url": "http://127.0.0.1:8880",
+  "gateway_key": "",
+  "gateway_timeout": 1800,
   "host": "0.0.0.0",
   "port": 8870,
-  "disabled_models": [],
   "disabled_sizes": [],
-  "user_concurrency": 4
+  "user_concurrency": 4,
+  "comfyui": { "url": "" }
 }

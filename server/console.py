@@ -36,6 +36,9 @@ LOG_LIMIT = 1500
 NOISE = re.compile(r'"(GET|PUT|HEAD) /api/(usage|jobs|boards|assets|me|models|users|health)[^"]*" 200')
 
 
+SOURCE_TILES = (("flow", "Flow"), ("chatgpt", "ChatGPT"), ("xyq", "小云雀"), ("libtv", "LibTV"), ("lovart", "Lovart"))
+
+
 class ServerThread:
     """uvicorn in a background thread that can be stopped and started again."""
 
@@ -129,7 +132,7 @@ class Console:
         self.logq: "queue.Queue[tuple[int, str]]" = queue.Queue()
         setup_logging(self.logq)
         self.server = ServerThread(self.settings)
-        self.flow: dict = {"usage": None, "health": None, "error": ""}
+        self.cloud: dict = {"health": None, "ext": None, "error": "", "balances": [], "tasks": []}
         ctk.set_appearance_mode("Dark")
         try:   # own taskbar identity: without it the window is grouped under pythonw.exe and shows its icon
             import ctypes
@@ -140,12 +143,13 @@ class Console:
         self.set_icon(self.root)
         self.hide_noise = tk.BooleanVar(value=True)
         self.root.title("Terry Flow 控制台")
-        self.root.geometry("1080x660")
-        self.root.minsize(900, 600)
+        self.root.geometry("1080x760")
+        self.root.minsize(900, 700)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.build()
         self.server.start()
-        threading.Thread(target=self.flow_loop, daemon=True).start()
+        threading.Thread(target=self.cloud_loop, daemon=True).start()
+        threading.Thread(target=self.cloud_credit_loop, daemon=True).start()
         self.root.after(200, self.pump_log)
         self.root.after(300, self.refresh)
 
@@ -168,8 +172,8 @@ class Console:
     def build(self) -> None:
         r = self.root
         r.grid_columnconfigure(0, weight=1)
-        r.grid_rowconfigure(2, weight=3)
-        r.grid_rowconfigure(3, weight=2)
+        r.grid_rowconfigure(3, weight=3)
+        r.grid_rowconfigure(4, weight=2)
 
         top = ctk.CTkFrame(r, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 8))
@@ -180,27 +184,39 @@ class Console:
 
         cards = ctk.CTkFrame(r, fg_color="transparent")
         cards.grid(row=1, column=0, sticky="ew", padx=16)
-        self.stats = {k: Stat(cards, t) for k, t in (("server", "服务器"), ("flow", "Flow 后端"), ("credits", "剩余额度"),
-                                                     ("today", "今日生成"), ("jobs", "进行中的任务"))}
+        self.stats = {k: Stat(cards, t) for k, t in (("server", "服务器"), ("cloud", "聚合API"), ("jobs", "进行中的任务"),
+                                                     ("ctasks", "今日完成"))}
         for i, s in enumerate(self.stats.values()):
             cards.grid_columnconfigure(i, weight=1, uniform="c")
             s.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
 
+        # second row: one tile per source behind the aggregation API
+        cards2 = ctk.CTkFrame(r, fg_color="transparent")
+        cards2.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 0))
+        src_stats = {k: Stat(cards2, t) for k, t in SOURCE_TILES}
+        for i, s in enumerate(src_stats.values()):
+            cards2.grid_columnconfigure(i, weight=1, uniform="c")
+            s.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
+        self.stats.update(src_stats)
+
         mid = ctk.CTkFrame(r, fg_color="transparent")
-        mid.grid(row=2, column=0, sticky="nsew", padx=16, pady=(12, 0))
+        mid.grid(row=3, column=0, sticky="nsew", padx=16, pady=(12, 0))
         mid.grid_columnconfigure(0, weight=5, uniform="m")
         mid.grid_columnconfigure(1, weight=6, uniform="m")
         mid.grid_rowconfigure(0, weight=1)
         self.style_tree()
-        self.users = self.table(mid, 0, "用户", [("name", "用户", 120, "w"), ("boards", "画板", 52, "center"),
-                                                  ("today", "今日", 52, "center"), ("total", "累计", 60, "center"),
-                                                  ("state", "状态", 90, "center")])
+        self.users = self.table(mid, 0, "用户（点「积分模型」一列的单元格，下拉选择是否开通）",
+                                [("name", "用户", 110, "w"), ("paid", "积分模型", 76, "center"), ("boards", "画板", 48, "center"),
+                                 ("today", "今日", 48, "center"), ("total", "累计", 56, "center"), ("state", "状态", 80, "center")])
+        self.user_ids: list[str] = []
+        self.users.tag_configure("paid", foreground=OK)
+        self.users.bind("<Button-1>", self.paid_menu)
         self.tasks = self.table(mid, 1, "正在运行的任务", [("user", "用户", 90, "w"), ("model", "模型", 150, "w"),
                                                         ("state", "状态", 90, "w"), ("time", "已用", 70, "center"),
                                                         ("prompt", "提示词", 200, "w")])
 
         box = ctk.CTkFrame(r, fg_color=CARD, corner_radius=10, border_width=1, border_color=EDGE)
-        box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(12, 16))
+        box.grid(row=4, column=0, sticky="nsew", padx=16, pady=(12, 16))
         box.grid_columnconfigure(0, weight=1)
         box.grid_rowconfigure(1, weight=1)
         head = ctk.CTkFrame(box, fg_color="transparent")
@@ -256,16 +272,16 @@ class Console:
         self.log.configure(state="disabled")
 
     # ---- settings window: where each resolution comes from, ComfyUI models, and the main config.json options
-    ROUTES = {"Flow 原生": ("flow", ""), "SeedVR2（ComfyUI 放大）": ("comfy", "seedvr2"), "PiD（ComfyUI 放大）": ("comfy", "pid"),
+    ROUTES = {"原生出图": ("flow", ""), "SeedVR2（ComfyUI 放大）": ("comfy", "seedvr2"), "PiD（ComfyUI 放大）": ("comfy", "pid"),
               "关闭": ("off", "")}
-    NEED_RESTART = ("flow_base_url", "flow_api_key", "port", "max_parallel_jobs", "user_concurrency")
+    NEED_RESTART = ("port", "user_concurrency", "gateway_url", "gateway_key")
 
     def open_settings(self) -> None:
         import json
         win = ctk.CTkToplevel(self.root, fg_color=BG)
         self.set_icon(win)
         win.title("服务器设置")
-        win.geometry("700x640")
+        win.geometry("700x760")
         win.transient(self.root)
         win.after(150, win.focus)
         cfg_path = ROOT / "config.json"
@@ -288,14 +304,54 @@ class Console:
                               segmented_button_selected_hover_color=ACCENT, segmented_button_unselected_color=EDGE,
                               segmented_button_unselected_hover_color="#4a4a4a", text_color="#101418")
         tabs.pack(fill="both", expand=True, padx=16, pady=(14, 0))
-        t1, t2, t3 = tabs.add("分辨率"), tabs.add("服务"), tabs.add("ComfyUI 模型")
+        tg, ta, tf, tx = (tabs.add(n) for n in ("通用", "聚合API", "出图设置", "ComfyUI"))
+        f2: dict[str, ctk.CTkEntry] = {}
 
-        # --- tab 1: ComfyUI address + one menu per resolution
-        label(t1, "ComfyUI 地址（放大与以后的编辑、生图、视频、文本增强）").grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 4))
-        url = entry(t1, s.comfy_url, 330)
+        def field(parent, row: int, text: str, key: str, val, width: int, show=None) -> None:
+            label(parent, text).grid(row=row, column=0, sticky="w", padx=10, pady=7)
+            f2[key] = entry(parent, val, width, show)
+            f2[key].grid(row=row, column=1, columnspan=2, sticky="w", pady=7)
+
+        def note(parent, row: int, text: str) -> None:
+            label(parent, text, DIM, 12).grid(row=row, column=0, columnspan=3, sticky="w", padx=10, pady=(2, 8))
+
+        for t in (tg, ta, tf, tx):
+            t.grid_columnconfigure(0, minsize=250)
+
+        # --- 通用
+        field(tg, 0, "端口（重启生效）", "port", s.port, 100)
+        field(tg, 1, "任务超时（分钟）", "job_timeout", round(s.job_timeout / 60, 1), 100)
+        field(tg, 2, "上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100)
+        field(tg, 3, "每个用户同时生成的任务数上限（所有模型，重启生效）", "user_concurrency", s.user_concurrency, 100)
+        note(tg, 4, "所有生成（Flow、ChatGPT、小云雀、LibTV、Lovart）都经聚合API；各个平台的开关、授权、Key 在聚合API的管理页里设置。")
+
+        # --- 聚合API
+        field(ta, 0, "聚合API 地址（terry2api，重启生效）", "gateway_url", s.gateway_url, 340)
+        field(ta, 1, "聚合API Key（重启生效，没设置就留空）", "gateway_key", s.gateway_key, 340, "*")
+        field(ta, 2, "生成任务超时（分钟）", "gateway_timeout", round(s.gateway_timeout / 60, 1), 100)
+        note(ta, 3, "例如 http://192.168.100.123:8880 。画板里的模型、积分、可用来源都来自它；它那边停用或没授权的平台，这里不会出现。")
+
+        # --- 出图设置：画布自己的出图处理（哪些模型出现由聚合API的来源设置决定）
+        label(tf, "每个分辨率由谁来出：", TEXT).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 2))
+        note(tf, 1, "选 SeedVR2 / PiD 时，先出较小的一档，再放大到该分辨率；放大需要在 ComfyUI 页填好地址。关闭某个模型请在聚合API管理页「来源 → Flow → 设置」里填。")
+        back = {v: k for k, v in self.ROUTES.items()}
+        route_boxes: dict[str, ctk.CTkOptionMenu] = {}
+        for i, size in enumerate(SIZE_ORDER):
+            spec = s.resolutions.get(size, {})
+            label(tf, size).grid(row=2 + i, column=0, sticky="w", padx=10, pady=5)
+            kind = (spec.get("route", "flow"), spec.get("engine", s.comfy_engine) if spec.get("route") == "comfy" else "")
+            box = ctk.CTkOptionMenu(tf, values=list(self.ROUTES), width=240, fg_color=EDGE, button_color=EDGE, font=font,
+                                    dropdown_font=font)
+            box.set(back.get(kind, "原生出图"))
+            box.grid(row=2 + i, column=1, sticky="w", pady=5)
+            route_boxes[size] = box
+
+        # --- ComfyUI: address and the model files its enlarge workflows use
+        label(tx, "ComfyUI 地址（放大与以后的编辑、生图、视频、文本增强）").grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 4))
+        url = entry(tx, s.comfy_url, 330)
         url.configure(placeholder_text="http://127.0.0.1:8188（留空 = 不启用放大）")
         url.grid(row=1, column=0, columnspan=2, sticky="w", padx=10)
-        status = label(t1, "", DIM, 12)
+        status = label(tx, "", DIM, 12)
         status.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(2, 10))
         models: dict[str, list[str]] = {}
 
@@ -307,9 +363,9 @@ class Console:
                     r = c.get(target + "/system_stats")
                     r.raise_for_status()
                     ver = r.json().get("system", {}).get("comfyui_version", "?")
-                    for node, field in names.items():
-                        info = c.get(f"{target}/object_info/{node}").json()[node]["input"]["required"][field][0]
-                        out[field] = [v for v in info if isinstance(v, str)]
+                    for node, field_name in names.items():
+                        info = c.get(f"{target}/object_info/{node}").json()[node]["input"]["required"][field_name][0]
+                        out[field_name] = [v for v in info if isinstance(v, str)]
                 msg, col = f"连接成功（ComfyUI {ver}）", OK
             except Exception as exc:
                 msg, col = f"连接失败：{type(exc).__name__}", BAD
@@ -317,71 +373,38 @@ class Console:
 
             def done() -> None:
                 status.configure(text=msg, text_color=col)
-                for field, box in combos.values():
-                    if models.get(field):
-                        box.configure(values=models[field])
+                for fname, box in combos.values():
+                    if models.get(fname):
+                        box.configure(values=models[fname])
             win.after(0, done)
 
         def test() -> None:
             status.configure(text="连接中…", text_color=DIM)
             threading.Thread(target=fetch_models, args=(url.get().strip().rstrip("/"),), daemon=True).start()
 
-        ctk.CTkButton(t1, text="测试连接", width=84, height=28, fg_color=EDGE, hover_color="#4a4a4a", command=test).grid(row=1, column=2, padx=8)
-        label(t1, "每个分辨率由谁来出：", TEXT).grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=(4, 2))
-        label(t1, "选 SeedVR2 / PiD 时，服务器先让 Flow 出较小的一档，再放大到该分辨率；尺寸由服务器自动决定。", DIM, 12).grid(
-            row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 8))
-        back = {v: k for k, v in self.ROUTES.items()}
-        route_boxes: dict[str, ctk.CTkOptionMenu] = {}
-        for i, size in enumerate(SIZE_ORDER):
-            spec = s.resolutions.get(size, {})
-            label(t1, size).grid(row=5 + i, column=0, sticky="w", padx=10, pady=6)
-            kind = (spec.get("route", "flow"), spec.get("engine", s.comfy_engine) if spec.get("route") == "comfy" else "")
-            box = ctk.CTkOptionMenu(t1, values=list(self.ROUTES), width=240, fg_color=EDGE, button_color=EDGE, font=font,
-                                    dropdown_font=font)
-            box.set(back.get(kind, "Flow 原生"))
-            box.grid(row=5 + i, column=1, sticky="w", pady=6)
-            route_boxes[size] = box
-
-        # --- tab 2: config.json options
-        rows2 = [("Flow 地址（重启生效）", "flow_base_url", s.flow_base_url, 340, None),
-                 ("Flow API Key（重启生效）", "flow_api_key", s.flow_api_key, 340, "*"),
-                 ("端口（重启生效）", "port", s.port, 100, None),
-                 ("同时转发给 Flow 的任务数（重启生效）", "max_parallel_jobs", s.max_parallel_jobs, 100, None),
-                 ("每个用户同时生成的张数上限（重启生效）", "user_concurrency", s.user_concurrency, 100, None),
-                 ("任务超时（分钟）", "job_timeout", round(s.job_timeout / 60, 1), 100, None),
-                 ("上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100, None),
-                 ("关闭的模型（key，逗号分隔）", "disabled_models", ", ".join(s.disabled_models), 340, None)]
-        f2: dict[str, ctk.CTkEntry] = {}
-        for i, (text, key, val, width, show) in enumerate(rows2):
-            label(t2, text).grid(row=i, column=0, sticky="w", padx=10, pady=7)
-            f2[key] = entry(t2, val, width, show)
-            f2[key].grid(row=i, column=1, sticky="w", pady=7)
-        t2.grid_columnconfigure(0, minsize=260)
-
-        # --- tab 3: model files used by the enlarge workflows (choices come from ComfyUI once connected)
+        ctk.CTkButton(tx, text="测试连接", width=84, height=28, fg_color=EDGE, hover_color="#4a4a4a", command=test).grid(row=1, column=2, padx=8)
         from .comfy_workflows import DEFAULT_PID, DEFAULT_SEEDVR2
         combos: dict[str, tuple[str, ctk.CTkComboBox]] = {}
         spec3 = [("SeedVR2", [("扩散模型", "seedvr2", "unet", "unet_name"), ("VAE", "seedvr2", "vae", "vae_name"),
                                  ("颜色校正", "seedvr2", "color_correction", "color_correction")]),
                  ("PiD", [("扩散模型", "pid", "unet", "unet_name"), ("文本编码器", "pid", "clip", "clip_name"),
                           ("VAE（图片编码）", "pid", "vae", "vae_name")])]
-        defaults = {"seedvr2": DEFAULT_SEEDVR2, "pid": DEFAULT_PID}
         cur = {"seedvr2": {**DEFAULT_SEEDVR2, **s.comfy_seedvr2}, "pid": {**DEFAULT_PID, **s.comfy_pid}}
-        r = 0
+        r = 3
         for group, items in spec3:
-            label(t3, group, TEXT, 14).grid(row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 2))
+            label(tx, group, TEXT, 14).grid(row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 2))
             r += 1
-            for text, eng, key, field in items:
-                label(t3, text).grid(row=r, column=0, sticky="w", padx=10, pady=5)
-                cb = ctk.CTkComboBox(t3, width=400, values=[cur[eng][key]], font=font, dropdown_font=font)
+            for text, eng, key, field_name in items:
+                label(tx, text).grid(row=r, column=0, sticky="w", padx=10, pady=5)
+                cb = ctk.CTkComboBox(tx, width=400, values=[cur[eng][key]], font=font, dropdown_font=font)
                 cb.set(cur[eng][key])
                 if key == "color_correction":
                     cb.configure(values=["lab", "wavelet", "adain", "none"], state="readonly")
-                cb.grid(row=r, column=1, sticky="w", pady=5)
-                combos[f"{eng}.{key}"] = (field, cb)
+                cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=5)
+                combos[f"{eng}.{key}"] = (field_name, cb)
                 r += 1
-        label(t3, "点“分辨率”页的“测试连接”后，下拉里会列出 ComfyUI 里现有的文件。颜色校正：lab 最接近原图，wavelet 保留更多细节，none 不校正。", DIM, 12).grid(
-            row=r, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 0))
+        note(tx, r, "点“测试连接”后，下拉里会列出 ComfyUI 里现有的文件。颜色校正：lab 最接近原图，wavelet 保留更多细节，none 不校正。")
+
         if s.comfy_url:
             threading.Thread(target=fetch_models, args=(s.comfy_url,), daemon=True).start()
 
@@ -392,19 +415,28 @@ class Console:
                 res[size] = {"route": kind, **({"engine": eng} if eng else {})}
             try:
                 vals = {
-                    "port": int(f2["port"].get()), "max_parallel_jobs": max(1, int(f2["max_parallel_jobs"].get())),
+                    "port": int(f2["port"].get()),
                     "user_concurrency": max(1, min(64, int(f2["user_concurrency"].get()))),
                     "job_timeout": max(60.0, float(f2["job_timeout"].get()) * 60),
                     "max_upload_bytes": max(1, int(float(f2["max_upload_mb"].get()))) * 1048576,
+                    "gateway_timeout": max(60.0, float(f2["gateway_timeout"].get()) * 60),
                 }
             except ValueError:
-                messagebox.showerror("设置", "端口、任务数、并发张数、超时、上传上限都需要是数字", parent=win)
+                messagebox.showerror("设置", "端口、并发张数、超时、上传上限都需要是数字", parent=win)
                 return
             before = {k: getattr(self.settings, k) for k in self.NEED_RESTART}
-            raw.update(flow_base_url=f2["flow_base_url"].get().strip(), flow_api_key=f2["flow_api_key"].get().strip(),
-                       port=vals["port"], max_parallel_jobs=vals["max_parallel_jobs"], user_concurrency=vals["user_concurrency"],
-                       job_timeout=vals["job_timeout"], max_upload_bytes=vals["max_upload_bytes"],
-                       disabled_models=[m.strip() for m in f2["disabled_models"].get().split(",") if m.strip()])
+            old_keys = ("flow_base_url", "flow_api_key", "max_parallel_jobs", "gpt_base_url", "gpt_api_key", "apis", "use_gateway",
+                        "cloud_base_url", "cloud_api_key", "cloud_timeout")
+            if any(k in raw for k in old_keys):   # the direct Flow / ChatGPT settings are gone: keep a copy once, then drop them
+                bak = cfg_path.with_name("config.json.before-gateway")
+                if not bak.exists():
+                    bak.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+                for k in old_keys:
+                    raw.pop(k, None)
+            raw.update(port=vals["port"], user_concurrency=vals["user_concurrency"], job_timeout=vals["job_timeout"],
+                       max_upload_bytes=vals["max_upload_bytes"], gateway_timeout=vals["gateway_timeout"],
+                       gateway_url=f2["gateway_url"].get().strip().rstrip("/"), gateway_key=f2["gateway_key"].get().strip())
+            raw.pop("disabled_models", None)   # moved: switched off per source in the aggregation API
             comfy = dict(cf)
             comfy["url"] = url.get().strip().rstrip("/")
             comfy.pop("upscale_engine", None)   # each resolution has its own engine now
@@ -474,35 +506,89 @@ class Console:
         self.root.destroy()
 
     # ---- data
-    def flow_loop(self) -> None:
-        """Poll flow2api. A single failed poll is network noise (flow2api is often busy generating),
-        so the last good reading is kept until several polls in a row fail."""
+    def cloud_loop(self) -> None:
+        """Poll the terry2api aggregation service (小云雀 / LibTV / Lovart): up or down, which platforms are set up,
+        and whether its browser extension is connected."""
         fails = 0
         while True:
             s = self.settings
-            headers = {"Authorization": f"Bearer {s.flow_api_key}"}
+            if not s.gateway_url:
+                self.cloud = {"health": None, "ext": None, "error": "", "off": True, "balances": [], "tasks": []}
+                time.sleep(10)
+                continue
             try:
-                with httpx.Client(timeout=15, trust_env=False) as c:
-                    h = c.get(s.flow_base_url + "/health")
+                headers = {"Authorization": f"Bearer {s.gateway_key}"} if s.gateway_key else {}
+                with httpx.Client(timeout=10, trust_env=False) as c:
+                    h = c.get(s.gateway_url + "/health")
                     h.raise_for_status()
-                    health = h.json()
-                    try:  # credits are secondary: a failure here must not mark the backend as down
-                        u = c.get(s.flow_base_url + "/v1/usage", headers=headers)
-                        u.raise_for_status()
-                        usage = u.json()
+                    try:
+                        e = c.get(s.gateway_url + "/v1/extension", headers=headers)
+                        ext = e.json() if e.status_code == 200 else None
                     except Exception:
-                        usage = self.flow.get("usage")
-                    self.flow = {"usage": usage, "health": health, "error": ""}
+                        ext = None
+                    try:
+                        t = c.get(s.gateway_url + "/v1/tasks", params={"limit": 100}, headers=headers)
+                        tasks = t.json().get("tasks", []) if t.status_code == 200 else self.cloud.get("tasks", [])
+                    except Exception:
+                        tasks = self.cloud.get("tasks", [])
+                    self.cloud = {**self.cloud, "health": h.json(), "ext": ext, "error": "", "tasks": tasks, "off": False}
                 fails = 0
             except Exception as exc:
                 fails += 1
-                if isinstance(exc, httpx.HTTPStatusError):
-                    err = f"HTTP {exc.response.status_code}"
-                else:
-                    err = type(exc).__name__
-                if fails >= 3 or self.flow.get("health") is None:
-                    self.flow = {"usage": None, "health": None, "error": err}
+                if fails >= 2 or self.cloud.get("health") is None:
+                    self.cloud = {**self.cloud, "health": None, "ext": None, "error": type(exc).__name__, "off": False}
             time.sleep(3 if fails else 10)
+
+    def cloud_credit_loop(self) -> None:
+        """Credits of the three platforms. Asking terry2api can take a while (it may go through the browser extension),
+        so this has its own slow loop instead of holding up the status poll."""
+        while True:
+            s = self.settings
+            if s.gateway_url and self.cloud.get("health") is not None:
+                try:
+                    headers = {"Authorization": f"Bearer {s.gateway_key}"} if s.gateway_key else {}
+                    with httpx.Client(timeout=60, trust_env=False) as c:
+                        r = c.get(s.gateway_url + "/v1/balances", headers=headers)
+                        r.raise_for_status()
+                        self.cloud["balances"] = r.json().get("items", [])
+                except Exception:
+                    pass   # keep the last reading
+                time.sleep(60)
+            else:
+                time.sleep(5)
+
+    def paid_menu(self, event) -> None:
+        """Click a user's 「积分模型」 cell: a drop-down with 未开通 / 已开通. Everyone else only gets the free models."""
+        if self.users.identify_region(event.x, event.y) != "cell" or self.users.identify_column(event.x) != "#2":
+            return
+        row = self.users.identify_row(event.y)
+        if not row:
+            return
+        idx = self.users.index(row)
+        if idx >= len(self.user_ids):
+            return
+        uid, name = self.user_ids[idx], self.users.set(row, "name")
+        now = self.users.set(row, "paid").startswith("已开通")
+        menu = tk.Menu(self.root, tearoff=0, bg=CARD, fg=TEXT, activebackground=EDGE, activeforeground=TEXT, bd=0, font=("Microsoft YaHei UI", 10))
+        for label, on in (("未开通（只能用免费模型）", False), ("已开通（可用积分模型）", True)):
+            menu.add_command(label=("✓ " if on == now else "    ") + label, command=lambda on=on: self.set_paid(uid, name, on, now))
+        x, y, _w, h = self.users.bbox(row, "#2")
+        menu.tk_popup(self.users.winfo_rootx() + x, self.users.winfo_rooty() + y + h)
+
+    def set_paid(self, uid: str, name: str, on: bool, now: bool) -> None:
+        if on == now:
+            return
+        if on and not messagebox.askyesno("开通积分模型", f"给「{name}」开通积分模型？" + chr(10) + "开通后他可以使用会消耗聚合API积分的模型（小云雀 / LibTV / Lovart 的付费档位和视频）。"):
+            return
+        try:
+            db = sqlite3.connect(self.settings.db_path.as_posix(), timeout=5)
+            try:
+                db.execute("UPDATE users SET paid=? WHERE id=?", (1 if on else 0, uid))
+                db.commit()
+            finally:
+                db.close()
+        except sqlite3.Error as exc:
+            messagebox.showerror("没有保存", f"写数据库失败：{exc}")
 
     def query(self) -> tuple[list, list]:
         midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
@@ -510,7 +596,7 @@ class Console:
         db.row_factory = sqlite3.Row
         try:
             users = db.execute(
-                "SELECT u.name, "
+                "SELECT u.id, u.name, u.paid, "
                 " (SELECT COUNT(*) FROM boards b WHERE b.user=u.id) AS boards,"
                 " (SELECT COUNT(*) FROM jobs j WHERE j.user=u.id AND j.status='done' AND j.finished>=?) AS today,"
                 " (SELECT COUNT(*) FROM jobs j WHERE j.user=u.id AND j.status='done') AS total,"
@@ -539,25 +625,62 @@ class Console:
         else:
             self.stats["server"].set("启动中…", f"端口 {self.settings.port}", WARN)
 
-        fl = self.flow
-        if fl["health"] is not None:
-            h = fl["health"]
-            ok = h.get("backend_running") and h.get("active_tokens", 0) > 0
-            self.stats["flow"].set("正常" if ok else "异常", f"账号 {h.get('active_tokens', 0)}/{h.get('total_tokens', 0)} 可用 · 验证码 {h.get('captcha_method', '?')}",
-                                   OK if ok else WARN)
-        elif fl["error"]:
-            self.stats["flow"].set("无法连接", fl["error"], BAD)
-        u = fl["usage"]
-        if u:
-            self.stats["credits"].set(str(u.get("credits", "–")), "Flow 账号剩余点数")
-            used = sum(int(d.get("used", 0)) for d in u.get("image_daily", []))
-            detail = " · ".join(f"{'Pro' if d.get('key') == 'pro' else '其他'} {d.get('used')}/{d.get('limit')}" for d in u.get("image_daily", []))
-            self.stats["today"].set(f"{used} 张", detail)
+        cl = self.cloud
+        if cl.get("off"):
+            self.stats["cloud"].set("未配置", "设置里填聚合API地址", DIM)
+            for k in ("ctasks", *(k for k, _ in SOURCE_TILES)):
+                self.stats[k].set("–", "", DIM)
+        elif cl["health"] is not None:
+            provs = cl["health"].get("providers") or {}
+            ext = cl.get("ext") or {}
+            on = [k for k, _ in SOURCE_TILES if provs.get(k)]
+            sub = f"来源 {len(on)}/{len(SOURCE_TILES)} 可用 · 扩展{'已连接' if ext.get('connected') else '未连接'}"
+            self.stats["cloud"].set("正常" if on else "无可用来源", sub, OK if on and ext.get("connected") else WARN)
+            bal = {b.get("provider"): b for b in cl.get("balances") or []}
+            for k, _ in SOURCE_TILES:
+                b = bal.get(k)
+                if not provs.get(k):
+                    self.stats[k].set("未启用", "聚合API里停用或没配置", DIM)
+                elif b and b.get("ok") and str(b.get("balance")) not in ("?", "—", "None", ""):
+                    try:
+                        val = f"{float(b['balance']):,.0f}"
+                    except (TypeError, ValueError):
+                        val = str(b["balance"])
+                    parts = []
+                    if k == "flow" and b.get("image_daily"):
+                        # Flow: today's image quota is what matters; the account credits are secondary
+                        daily = b["image_daily"]
+                        main = next((d for d in daily if d.get("key") != "pro"), daily[0])
+                        val = f"{main.get('used')}/{main.get('limit')}"
+                        sub = ["今日出图"] + [f"Pro {d.get('used')}/{d.get('limit')}" for d in daily if d is not main] + [f"剩余点数 {b['balance']}"]
+                        self_stat = self.stats[k]
+                        self_stat.set(val, " · ".join(sub))
+                        continue
+                    if b.get("unlimited"):
+                        parts.append(f"无限低速 {len(b['unlimited'])} 个")
+                    if b.get("expire"):
+                        parts.append(f"到期 {b['expire']}")
+                    self.stats[k].set(val, " · ".join(parts) or "剩余积分")
+                elif b and b.get("error"):
+                    self.stats[k].set("未读到", str(b["error"])[:34], WARN)
+                else:
+                    self.stats[k].set("可用", "", OK)
+            ctasks = cl.get("tasks") or []
+            run = sum(1 for t in ctasks if t.get("status") == "running")
+            wait = sum(1 for t in ctasks if t.get("status") == "queued")
+            midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            done = sum(1 for t in ctasks if t.get("status") == "done" and (t.get("finished") or 0) >= midnight)
+            self.stats["ctasks"].set(str(done), f"聚合API 里运行 {run} · 排队 {wait}", ACCENT if run + wait else TEXT)
+        elif cl["error"]:
+            self.stats["cloud"].set("无法连接", f"{cl['error']} · 聚合API没有启动？", BAD)
+            for k in ("ctasks", *(k for k, _ in SOURCE_TILES)):
+                self.stats[k].set("–", "", DIM)
         self.stats["jobs"].set(str(len(tasks)), f"运行 {run} · 排队 {wait}", ACCENT if tasks else TEXT)
 
-        self.fill(self.users, [((r["name"], r["boards"], r["today"], r["total"],
+        self.user_ids = [r["id"] for r in users]
+        self.fill(self.users, [((r["name"], "已开通 ▾" if r["paid"] else "未开通 ▾", r["boards"], r["today"], r["total"],
                                  f"生成中 {r['running']}" if r["running"] else f"排队 {r['queued']}" if r["queued"] else "空闲"),
-                                ("busy",) if r["running"] else ("wait",) if r["queued"] else ()) for r in users])
+                                (("busy",) if r["running"] else ("wait",) if r["queued"] else ()) + (("paid",) if r["paid"] else ())) for r in users])
         now = time.time()
         self.fill(self.tasks, [((t["user"], t["model"], "生成中" if t["status"] == "running" else "排队中",
                                  fmt_duration(now - (t["started"] or t["created"])), (t["prompt"] or "").replace("\n", " ")[:80]),

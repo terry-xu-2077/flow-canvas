@@ -48,6 +48,25 @@ def save_image_bytes(settings: Settings, store: Store, data: bytes, *, limit: bo
     return {"id": asset_id, "w": w, "h": h, "mime": ALLOWED_FORMATS[fmt]}
 
 
+VIDEO_MIME = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska"}
+
+
+def save_video_bytes(settings: Settings, store: Store, data: bytes, ext: str = ".mp4") -> dict:
+    """Store a generated video like an image asset (content-addressed; width/height are not known, so 0)."""
+    if not data:
+        raise AssetError("空文件")
+    mime = VIDEO_MIME.get(ext.lower(), "video/mp4")
+    asset_id = hashlib.sha1(data).hexdigest()
+    path = asset_path(settings, asset_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        tmp = path.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    store.put_asset(asset_id, mime, 0, 0, len(data))
+    return {"id": asset_id, "w": 0, "h": 0, "mime": mime}
+
+
 def thumbnail_path(settings: Settings, asset_id: str, width: int) -> Path:
     """Return a cached WEBP thumbnail no wider than `width`, creating it on first use."""
     width = max(64, min(int(width), 2048))

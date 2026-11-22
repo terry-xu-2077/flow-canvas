@@ -596,3 +596,95 @@ button.up-edit:hover { background: #ffffff12; color: #dfe6ee; }
 .lib-tabs button { white-space: nowrap; flex: none; }
 .lib-item { cursor: zoom-in; }
 .lib-actions { cursor: default; }
+
+/* ================= model dropdown in the generation card's bottom bar ================= */
+.model-dd { position: relative; flex: none; }
+.model-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; padding: 6px 12px; border-radius: 999px;
+  background: #ffffff0f; border-color: transparent; font-size: 12.5px; }
+.model-btn:hover:not(:disabled), .model-btn.open { background: #ffffff1f; border-color: transparent; }
+.model-btn .caret { color: var(--muted); font-size: 11px; }
+.ico-model { width: 16px; height: 16px; flex: none; }
+.model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-menu { position: absolute; right: 0; bottom: calc(100% + 8px); width: 290px; max-height: 320px; overflow: auto; z-index: 40;
+  background: var(--panel); border: 1px solid #ffffff1c; border-radius: 20px; padding: 6px;
+  box-shadow: 0 12px 30px #000a; display: flex; flex-direction: column; gap: 2px; }
+.model-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+  border-color: transparent; border-radius: 14px; padding: 8px 10px; font-size: 13px; }
+.model-item:hover:not(:disabled) { background: #ffffff14; border-color: transparent; }
+.model-item.on { background: #ffffff0d; }
+.model-item .model-name { flex: 1 0 auto; min-width: 5.5em; }
+.model-tag { flex: none; font-size: 11px; color: var(--muted); background: #ffffff14; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.model-tag.warn { color: #ffd37a; }
+.model-check { flex: none; width: 16px; text-align: center; color: var(--accent); }
+
+/* One capsule, two segments (Flow | ChatGPT), each with its own thin bar; the numbers are only in the tooltips */
+.usage.combo { flex-direction: row; align-items: stretch; justify-content: flex-start; min-width: 0; padding: 0; }
+.usage-seg { position: relative; display: flex; align-items: center; padding: 0 16px; }
+.usage-seg + .usage-seg { border-left: 1px solid #ffffff14; }
+.usage-seg .usage-bar { position: absolute; left: 16px; right: 16px; bottom: 5px; height: 2px; }
+.usage-seg.warm .usage-bar i { background: #ffd37a; }
+.usage-seg.hot .usage-bar i { background: #ff7a7a; }
+.usage-bar.split { display: flex; gap: 4px; background: transparent; overflow: visible; }
+.usage-bar.split b { display: block; flex: 1; height: 100%; border-radius: 3px; background: #ffffff14; overflow: hidden; }
+.usage-bar.split b i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width .4s; }
+.usage-bar.split b.warm i { background: #ffd37a; }
+.usage-bar.split b.hot i { background: #ff7a7a; }
+
+/* ---- video cards (terry2api) */
+.card.image.video { background: #000; }
+.card.image .video-el { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.card.image.video .img-meta { pointer-events: auto; background: #0008; border-radius: 10px; padding: 2px 8px; }
+.card.image.video .img-meta .dl { color: #fff; text-decoration: underline; margin-left: 6px; cursor: pointer; }
+.card.vgen .hint { margin: 4px 0 2px; }
+
+/* ---- cloud credits (terry2api) and the cost estimate on the video card */
+.cloud-credits { display: inline-flex; gap: 6px; margin-right: 8px; align-items: center; }
+.cc-pill { display: inline-flex; gap: 6px; align-items: baseline; height: 32px; padding: 0 10px; align-items: center; border-radius: 14px;
+  background: #1b2027; border: 1px solid #ffffff0f; font-size: 12px; white-space: nowrap; cursor: default; }
+.cc-pill .cc-name { color: var(--muted); }
+.cc-pill .cc-num { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cc-pill .cc-inf { color: var(--accent); font-weight: 700; }
+.cc-pill.bad .cc-num { color: #ff9a8a; }
+.card.vgen .est { font-size: 12px; padding: 2px 4px 0; color: var(--text); }
+.card.vgen .est .muted { color: var(--muted); }
+.card.vgen .est .free { color: var(--accent); }
+
+/* ---- video settings panel (ratio grid, duration slider, resolution pills, audio switch) */
+.vpop { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
+.vpop .pop-title { font-size: 15px; }
+.vpop .ratios { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.vpop .ratios button { height: 58px; justify-content: center; font-weight: 600; }
+.vpop .ratios button.on { border-color: #fff; background: #ffffff10; }
+.glyph-none { display: block; width: 16px; height: 16px; }
+.pop-row { display: flex; align-items: center; justify-content: space-between; }
+.pop-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pop-row .pop-label { margin: 0; }
+.slider { width: 100%; accent-color: #fff; margin: 0; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pills button { padding: 6px 16px; border-radius: 999px; background: var(--bg); }
+.pills button.on { border-color: #fff; background: #ffffff10; }
+.switch { position: relative; width: 46px; height: 26px; padding: 0; border-radius: 13px; border: 0; background: #3a424d; flex: none; }
+.switch i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left .15s; }
+.switch.on { background: var(--accent); }
+.switch.on i { left: 23px; background: #11161c; }
+
+/* ---- credits chip inside the generate button */
+button.has-cost { display: inline-flex; align-items: center; gap: 10px; }
+button.has-cost .lbl { display: inline-flex; align-items: center; gap: 4px; }
+.cost { display: inline-flex; align-items: center; gap: 2px; margin-right: -6px; padding: 1px 8px 1px 6px; border-radius: 999px;
+  background: #0003; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 18px; }
+.cost svg { width: 11px; height: 11px; }
+.cost.dim { opacity: .6; font-weight: 500; }
+.cost.free i { font-style: normal; margin-left: 3px; }
+
+/* the three platform credits are one joined pill (like the Flow / GPT quota pill) */
+.cloud-credits { gap: 0; height: 32px; border-radius: 14px; background: #1b2027; border: 1px solid #ffffff0f; overflow: hidden; }
+.cc-pill { height: 100%; border: 0; border-radius: 0; background: transparent; padding: 0 12px; }
+.cc-pill + .cc-pill { border-left: 1px solid #ffffff14; }
+
+.model-tag.free { color: #1d3a0a; background: var(--accent, #d7f23b); font-weight: 600; }
+.free-mark { display: block; width: fit-content; margin: 2px auto 0; font-style: normal; font-size: 12px; font-weight: 700; line-height: 1.5; padding: 0 8px; border-radius: 999px; color: #1d3a0a; background: var(--accent, #d7f23b); white-space: nowrap; }
+
+.img-label { position: absolute; left: 10px; bottom: 8px; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; color: #fffd; text-shadow: 0 1px 3px #000, 0 0 6px #0008; pointer-events: none; }
+.img-label.top { top: 8px; bottom: auto; }

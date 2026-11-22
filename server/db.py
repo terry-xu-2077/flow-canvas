@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY, mime TEXT NOT NULL, w INTEGER, h INTEGER, size INTEGER,
-    flow_ref TEXT, created REAL NOT NULL
+    flow_ref TEXT, gpt_ref TEXT, gw_ref TEXT, created REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, user TEXT NOT NULL, board TEXT, node TEXT,
@@ -43,6 +43,7 @@ class Store:
             self._db.commit()
         self._migrate_users()
         self._migrate_jobs()
+        self._migrate_paid()
 
     # -- helpers
     def _one(self, sql: str, args: tuple = ()) -> Optional[dict]:
@@ -62,6 +63,12 @@ class Store:
 
     def _migrate_jobs(self) -> None:
         with self._lock:
+            if "gpt_ref" not in {r[1] for r in self._db.execute("PRAGMA table_info(assets)")}:
+                self._db.execute("ALTER TABLE assets ADD COLUMN gpt_ref TEXT")
+                self._db.commit()
+            if "gw_ref" not in {r[1] for r in self._db.execute("PRAGMA table_info(assets)")}:
+                self._db.execute("ALTER TABLE assets ADD COLUMN gw_ref TEXT")
+                self._db.commit()
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(jobs)")}
             if "extra" not in cols:
                 self._db.execute("ALTER TABLE jobs ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
@@ -69,6 +76,17 @@ class Store:
 
     # -- boards
     # -- users (id is a random uuid; boards.user / jobs.user hold that id, the name can change)
+    def _migrate_paid(self) -> None:
+        """users.paid: 1 = may use the credit-costing models (the console switches it per user); everyone else only gets the free ones."""
+        with self._lock:
+            cols = {r["name"] for r in self._db.execute("PRAGMA table_info(users)")}
+            if "paid" not in cols:
+                self._db.execute("ALTER TABLE users ADD COLUMN paid INTEGER NOT NULL DEFAULT 0")
+                self._db.commit()
+
+    def set_user_paid(self, user_id: str, paid: bool) -> None:
+        self._run("UPDATE users SET paid=? WHERE id=?", (1 if paid else 0, user_id))
+
     def _migrate_users(self) -> None:
         """Boards and jobs used to be keyed by the user's name: give each such name a user row and re-key the rows."""
         with self._lock:
@@ -85,14 +103,14 @@ class Store:
 
     def list_users(self) -> list[dict]:
         return self._all(
-            "SELECT u.id, u.name, u.avatar, COUNT(b.id) AS boards, COALESCE(MAX(b.updated), u.created) AS updated "
+            "SELECT u.id, u.name, u.avatar, u.paid, COUNT(b.id) AS boards, COALESCE(MAX(b.updated), u.created) AS updated "
             "FROM users u LEFT JOIN boards b ON b.user=u.id GROUP BY u.id ORDER BY updated DESC")
 
     def get_user(self, user_id: str) -> Optional[dict]:
-        return self._one("SELECT id, name, avatar, created FROM users WHERE id=?", (user_id,))
+        return self._one("SELECT id, name, avatar, created, paid FROM users WHERE id=?", (user_id,))
 
     def get_user_by_name(self, name: str) -> Optional[dict]:
-        return self._one("SELECT id, name, avatar, created FROM users WHERE name=?", (name,))
+        return self._one("SELECT id, name, avatar, created, paid FROM users WHERE name=?", (name,))
 
     def create_user(self, name: str) -> dict:
         """Raises sqlite3.IntegrityError when the name is taken."""
@@ -132,7 +150,7 @@ class Store:
         that no job produced), newest first."""
         gen = self._all(
             "SELECT j.result_asset AS asset, j.prompt AS prompt, j.model AS model, a.w AS w, a.h AS h, MAX(j.finished) AS created "
-            "FROM jobs j JOIN assets a ON a.id=j.result_asset WHERE j.user=? AND j.status='done' AND j.result_asset IS NOT NULL "
+            "FROM jobs j JOIN assets a ON a.id=j.result_asset WHERE j.user=? AND j.status='done' AND j.result_asset IS NOT NULL AND a.mime LIKE 'image/%' "
             "GROUP BY j.result_asset ORDER BY created DESC LIMIT ?", (user, limit))
         made = {g["asset"] for g in self._all("SELECT DISTINCT result_asset AS asset FROM jobs WHERE user=? AND result_asset IS NOT NULL", (user,))}
         found: set[str] = set()
@@ -193,8 +211,8 @@ class Store:
     def get_asset(self, asset_id: str) -> Optional[dict]:
         return self._one("SELECT * FROM assets WHERE id=?", (asset_id,))
 
-    def set_flow_ref(self, asset_id: str, ref: Optional[str]) -> None:
-        self._run("UPDATE assets SET flow_ref=? WHERE id=?", (ref, asset_id))
+    def set_gw_ref(self, asset_id: str, ref: Optional[str]) -> None:
+        self._run("UPDATE assets SET gw_ref=? WHERE id=?", (ref, asset_id))
 
     # -- jobs
     def create_job(self, job: dict[str, Any]) -> None:
@@ -215,7 +233,7 @@ class Store:
             self._db.commit()
 
     def recent_done(self, limit: int = 80) -> list[dict]:
-        return self._all("SELECT extra, started, finished FROM jobs WHERE status='done' AND started IS NOT NULL "
+        return self._all("SELECT model, extra, started, finished FROM jobs WHERE status='done' AND started IS NOT NULL "
                          "ORDER BY finished DESC LIMIT ?", (limit,))
 
     def update_job(self, job_id: str, **fields: Any) -> None:

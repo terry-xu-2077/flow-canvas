@@ -8,9 +8,6 @@ from server.app import create_app, resolve_size
 from server.comfy import ComfyClient, ComfyError
 from server.comfy_workflows import UPSCALERS
 from server.config import Settings
-from server.flow import FlowClient
-
-from test_api import BASE, FakeFlow
 
 
 def test_resolve_size_routes():
@@ -94,14 +91,13 @@ def test_comfy_rejection_is_readable():
         raise AssertionError("expected ComfyError")
 
 
-def test_models_offer_comfy_sizes_and_jobs_carry_the_upscale(tmp_path):
-    fake = FakeFlow()
-    settings = Settings(flow_base_url=BASE, flow_api_key="k", data_dir=tmp_path / "data", comfy_url="http://comfy")
-    flow = FlowClient(BASE, "k", transport=httpx.MockTransport(fake.handle))
-    with TestClient(create_app(settings, flow)) as client:
-        client.headers["X-User"] = client.post("/api/users", json={"name": "小明"}).json()["id"]
+def test_models_offer_comfy_sizes_and_the_upscale_button(tmp_path):
+    from fake_gateway import make_app, paid_user
+    app, _ = make_app(tmp_path, comfy_url="http://comfy")
+    with TestClient(app) as client:
+        client.headers["X-User"] = paid_user(app, client, "小明")
         m = client.get("/api/models").json()
-        assert m["models"][0]["sizes"] == ["1K", "2K", "4K", "6K"]
+        assert next(x for x in m["models"] if x["provider"] == "flow")["sizes"] == ["1K", "2K", "4K", "6K"]
         assert m["upscale"] == {"enabled": True, "options": [
             {"size": "4K", "target": 4096, "engine": "seedvr2"}, {"size": "6K", "target": 6144, "engine": "seedvr2"}]}
         assert client.post("/api/upscale", json={"asset": "0" * 40}).status_code == 400   # unknown image
