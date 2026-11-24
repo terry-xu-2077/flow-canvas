@@ -320,10 +320,9 @@ class Console:
 
         # --- 通用
         field(tg, 0, "端口（重启生效）", "port", s.port, 100)
-        field(tg, 1, "任务超时（分钟）", "job_timeout", round(s.job_timeout / 60, 1), 100)
-        field(tg, 2, "上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100)
-        field(tg, 3, "每个用户同时生成的任务数上限（所有模型，重启生效）", "user_concurrency", s.user_concurrency, 100)
-        note(tg, 4, "所有生成（Flow、ChatGPT、小云雀、LibTV、Lovart）都经聚合API；各个平台的开关、授权、Key 在聚合API的管理页里设置。")
+        field(tg, 1, "上传图片上限（MB）", "max_upload_mb", round(s.max_upload_bytes / 1048576), 100)
+        field(tg, 2, "每个用户同时生成的任务数上限（所有模型，重启生效）", "user_concurrency", s.user_concurrency, 100)
+        note(tg, 3, "所有生成（Flow、ChatGPT、小云雀、LibTV、Lovart）都经聚合API；各个平台的开关、授权、Key 在聚合API的管理页里设置。")
 
         # --- 聚合API
         field(ta, 0, "聚合API 地址（terry2api，重启生效）", "gateway_url", s.gateway_url, 340)
@@ -417,7 +416,6 @@ class Console:
                 vals = {
                     "port": int(f2["port"].get()),
                     "user_concurrency": max(1, min(64, int(f2["user_concurrency"].get()))),
-                    "job_timeout": max(60.0, float(f2["job_timeout"].get()) * 60),
                     "max_upload_bytes": max(1, int(float(f2["max_upload_mb"].get()))) * 1048576,
                     "gateway_timeout": max(60.0, float(f2["gateway_timeout"].get()) * 60),
                 }
@@ -433,7 +431,8 @@ class Console:
                     bak.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
                 for k in old_keys:
                     raw.pop(k, None)
-            raw.update(port=vals["port"], user_concurrency=vals["user_concurrency"], job_timeout=vals["job_timeout"],
+            raw.pop("job_timeout", None)   # no longer used: gateway_timeout is the longest a generation may run
+            raw.update(port=vals["port"], user_concurrency=vals["user_concurrency"],
                        max_upload_bytes=vals["max_upload_bytes"], gateway_timeout=vals["gateway_timeout"],
                        gateway_url=f2["gateway_url"].get().strip().rstrip("/"), gateway_key=f2["gateway_key"].get().strip())
             raw.pop("disabled_models", None)   # moved: switched off per source in the aggregation API

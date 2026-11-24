@@ -114,7 +114,7 @@ def make_app(tmp_path, fake=None, **settings_kw):
     from server.config import Settings
     from server.gateway import GatewayClient
     fake = fake or FakeGateway()
-    settings = Settings(data_dir=tmp_path / "data", job_timeout=20, gateway_url=GATEWAY, gateway_timeout=20, **settings_kw)
+    settings = Settings(data_dir=tmp_path / "data", gateway_url=GATEWAY, gateway_timeout=20, **settings_kw)
     app = create_app(settings, GatewayClient(GATEWAY, "", transport=httpx.MockTransport(fake.handle)))
     app.state.runner.poll_interval = 0.05
     return app, fake

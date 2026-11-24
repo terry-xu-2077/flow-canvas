@@ -1,17 +1,13 @@
 """FastAPI app: boards, assets, jobs, models; also serves the built web UI."""
 from __future__ import annotations
 
-import io
-import json
 import re
 import sqlite3
 import asyncio
 import time
 import uuid
-import zipfile
 from urllib.parse import quote
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -19,14 +15,16 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .assets import AssetError, asset_path, save_image_bytes, save_video_bytes, thumbnail_path
-from .config import SIZE_ORDER, SIZE_TARGET, ROOT, Settings, load_settings
+from . import boards_io
+from .assets import AssetError, asset_path, save_image_bytes, thumbnail_path
+from .config import SIZE_ORDER, ROOT, Settings, load_settings
 from .db import BoardConflict, Store
 from .errors import GenError
 from .gateway import GatewayClient
 from .jobs import JobRunner, job_percent
+from .rules import (CLOUD_PROVIDERS, DEFAULT_RATIOS, FREE_PROVIDERS, REF_LIMITS, SOURCE_NAMES, combo_is_free,  # noqa: F401
+                    mentions_to_ordinals, resolve_size, upscale_info, upscale_options)
 
-PICTURE_TAG_RE = re.compile(r"<Picture\s+(\d+)>", re.I)
 
 USER_RE = re.compile(r"^[\w一-鿿\- ]{1,32}$")
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -74,75 +72,6 @@ class BoardBody(BaseModel):
     name: Optional[str] = Field(default=None, max_length=80)
     data: Optional[dict] = None
     base_rev: Optional[int] = None   # the revision this client loaded; a newer one saved elsewhere is not overwritten
-
-
-def resolve_size(settings: Settings, supported: list[str], size: str) -> Optional[tuple[str, Optional[int], str]]:
-    """Where a resolution comes from: (size Flow generates, long edge to enlarge to with ComfyUI or None, enlarge
-    engine), or None when this resolution is switched off / impossible for the model."""
-    size = (size or "1K").upper()
-    spec = settings.resolutions.get(size) or ({"route": "flow"} if size in supported else {"route": "off"})
-    if size in settings.disabled_sizes or spec.get("route") == "off":
-        return None
-    if spec.get("route") == "comfy":
-        if not settings.comfy_url or not supported:
-            return None
-        target = int(spec.get("target") or SIZE_TARGET.get(size, 4096))
-        base = str(spec.get("base") or "").upper()
-        if base not in supported:
-            # only a size Flow itself makes (its 2K stage already enlarges once, so a 2K that ComfyUI takes over is no base) and never native 4K
-            smaller = [z for z in ("1K", "2K") if z in supported and SIZE_TARGET[z] < target
-                       and (settings.resolutions.get(z) or {"route": "flow"}).get("route", "flow") == "flow"]
-            base = smaller[-1] if smaller else supported[0]
-        return base, target, str(spec.get("engine") or settings.comfy_engine)
-    return (size, None, "") if size in supported else None
-
-
-def upscale_options(settings: Settings) -> list[dict]:
-    """The enlarge steps the canvas button can offer: every resolution whose source is a ComfyUI enlarge."""
-    if not settings.comfy_url:
-        return []
-    out = []
-    for size in SIZE_ORDER:
-        spec = settings.resolutions.get(size) or {}
-        if spec.get("route") == "comfy" and size not in settings.disabled_sizes:
-            out.append({"size": size, "target": int(spec.get("target") or SIZE_TARGET[size]),
-                        "engine": str(spec.get("engine") or settings.comfy_engine)})
-    return out or [{"size": "4K", "target": SIZE_TARGET["4K"], "engine": settings.comfy_engine}]
-
-
-def upscale_info(settings: Settings) -> dict:
-    return {"enabled": bool(settings.comfy_url), "options": upscale_options(settings)}
-
-
-CLOUD_PROVIDERS = ("xyq", "libtv", "lovart")      # sources that make video too (and whose credits the top bar shows)
-SOURCE_NAMES = {"flow": "Flow", "chatgpt": "ChatGPT", "xyq": "小云雀", "libtv": "LibTV", "lovart": "Lovart"}
-DEFAULT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
-REF_LIMITS = {"flow": 14, "chatgpt": 8}   # most reference pictures a source takes (the rest take 9)
-
-
-def mentions_to_ordinals(prompt: str, n_refs: int) -> str:
-    """<Picture N> -> "第N张图"; a tag outside the list is dropped."""
-    return PICTURE_TAG_RE.sub(lambda m: f"第{m.group(1)}张图" if 1 <= int(m.group(1)) <= n_refs else "", prompt)
-
-
-FREE_PROVIDERS = ("flow", "chatgpt")   # no credits are spent on these (Flow: the shared flow2api account; ChatGPT: its own quota)
-
-
-def combo_is_free(m: dict, size: str, quality: str = "") -> bool:
-    """May a user without credit-model access pick this size + quality on this gateway model?
-    Free = 0 credits: the model is a free source, or the price table says 0 (zero), or the unlimited-slow mode covers it (slow; a
-    condition beyond the size, e.g. "low" quality, has to be matched by the chosen quality)."""
-    if m.get("provider") in FREE_PROVIDERS:
-        return True
-    free, s, q = m.get("free") or {}, str(size).lower(), (quality or "").lower()
-    zero = free.get("zero") or []
-    if q == "" and any(z == "*" or str(z).lower() == s for z in zero):
-        return True
-    slow = free.get("slow")
-    if slow and any(z == "*" or str(z).lower() == s for z in slow.get("res") or []):
-        extra = [str(x).lower() for x in slow.get("extra") or []]
-        return all(x == q for x in extra) if extra else q == ""
-    return False
 
 
 def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayClient] = None) -> FastAPI:
@@ -344,54 +273,6 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
             raise HTTPException(404, "画板不存在")
         return board
 
-    def _import_full(zf: zipfile.ZipFile, name: str, user: str) -> dict:
-        """Restore a board exported by the zip download: board.json (nodes, edges, viewport, name) + assets/*."""
-        try:
-            if zf.getinfo("board.json").file_size > 100 * 1024 ** 2:
-                raise HTTPException(400, "board.json 太大")
-            doc = json.loads(zf.read("board.json").decode("utf-8"))
-            data = doc["data"]
-            assert isinstance(data, dict)
-        except Exception:
-            raise HTTPException(400, "board.json 无法读取")
-        exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
-        entries = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(exts)]
-        if len(entries) > 1000:
-            raise HTTPException(400, "zip 里的图片太多")
-        for i in entries:
-            if i.file_size > settings.max_upload_bytes:
-                continue
-            try:
-                save_image_bytes(settings, store, zf.read(i))
-            except AssetError:
-                continue
-        for i in zf.infolist():   # generated videos that came along
-            ext = Path(i.filename).suffix.lower()
-            if not i.is_dir() and ext in (".mp4", ".webm", ".mov") and i.filename.startswith("assets/"):
-                save_video_bytes(settings, store, zf.read(i), ext)
-        nodes = []
-        for n in data.get("nodes") or []:
-            d = n.get("data") or {}
-            if n.get("type") == "image":
-                if d.get("pending") or not d.get("assetId") or not store.get_asset(d["assetId"]):
-                    continue  # unfinished placeholders and images that did not come along
-            elif n.get("type") == "video":
-                if d.get("pending") or not d.get("assetId") or not store.get_asset(d["assetId"]):
-                    continue
-            elif n.get("type") in ("gen", "vgen"):
-                n["data"] = {**d, "jobs": []}  # jobs belong to the old board; finished results are already nodes
-            elif n.get("type") == "refset":
-                n["data"] = {**d, "slots": [s if (not s.get("assetId") or store.get_asset(s["assetId"])) else {"id": s.get("id")}
-                                           for s in d.get("slots", [])]}
-            nodes.append(n)
-        keep = {n.get("id") for n in nodes}
-        edges = [e for e in data.get("edges") or [] if e.get("source") in keep and e.get("target") in keep]
-        title = ((doc.get("name") or name or "导入的画板").strip()[:60]) or "导入的画板"
-        board = store.create_board(user, uuid.uuid4().hex[:12], title)
-        store.save_board(user, board["id"], {"nodes": nodes, "edges": edges,
-                                             "viewport": data.get("viewport") or {"x": 40, "y": 40, "zoom": 0.6}}, title)
-        return {**board, "images": len(entries)}
-
     async def read_body(request: Request, limit: int, what: str = "文件") -> bytes:
         """The request body, refused as soon as it is known / found to be bigger than `limit` (never buffers more than that)."""
         declared = request.headers.get("content-length", "")
@@ -406,45 +287,12 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
 
     @app.post("/api/boards/import")
     async def import_board(request: Request, name: str = "", user: str = user_dep):
-        """Create a board from a zip of images (the inverse of the zip download); images are laid out in a grid."""
+        """Create a board from a zip: one exported by the zip download, or just a zip of pictures (laid out in a grid)."""
         raw = await read_body(request, 2 * 1024 ** 3, "zip 文件")
         try:
-            zf = zipfile.ZipFile(io.BytesIO(raw))
-        except zipfile.BadZipFile:
-            raise HTTPException(400, "不是有效的 zip 文件")
-        if "board.json" in zf.namelist():
-            return _import_full(zf, name, user)
-        exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
-        entries = sorted((i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(exts)),
-                         key=lambda i: i.filename)
-        if not entries:
-            raise HTTPException(400, "zip 里没有图片")
-        if len(entries) > 300:
-            raise HTTPException(400, "zip 里的图片太多（最多 300 张）")
-        nodes, seen = [], set()
-        cols, cell_w = 4, 300
-        for i in entries:
-            if i.file_size > settings.max_upload_bytes:
-                continue
-            try:
-                info = save_image_bytes(settings, store, zf.read(i))
-            except AssetError:
-                continue
-            if info["id"] in seen:
-                continue
-            seen.add(info["id"])
-            k = len(nodes)
-            w = 260
-            h = max(60, round(w * info["h"] / max(1, info["w"])))
-            nodes.append({"id": f"img_{uuid.uuid4().hex[:8]}", "type": "image",
-                          "position": {"x": (k % cols) * cell_w, "y": (k // cols) * 340},
-                          "width": w, "height": h, "data": {"assetId": info["id"], "w": info["w"], "h": info["h"]}})
-        if not nodes:
-            raise HTTPException(400, "zip 里没有可用的图片")
-        title = (name or "导入的画板").strip()[:60] or "导入的画板"
-        board = store.create_board(user, uuid.uuid4().hex[:12], title)
-        store.save_board(user, board["id"], {"nodes": nodes, "edges": [], "viewport": {"x": 40, "y": 40, "zoom": 0.6}}, title)
-        return {**board, "images": len(nodes)}
+            return boards_io.import_zip(settings, store, raw, name, user)
+        except boards_io.ImportError_ as exc:
+            raise HTTPException(400, str(exc))
 
     @app.get("/api/boards/{board_id}/zip")
     async def board_zip(board_id: str, user: str = user_dep):
@@ -452,32 +300,9 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
         board = store.get_board(user, board_id)
         if not board:
             raise HTTPException(404, "画板不存在")
-        ids: list[str] = []
-        for n in (board["data"].get("nodes") or []):
-            d = n.get("data") or {}
-            found = [d.get("assetId")] if n.get("type") in ("image", "video") else (
-                [s.get("assetId") for s in d.get("slots", [])] if n.get("type") == "refset" else [])
-            if isinstance(d.get("markup"), dict):  # the untouched picture under an annotated card travels with it
-                found.append(d["markup"].get("base"))
-            for a in found:
-                if a and a not in ids:
-                    ids.append(a)
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # images are already compressed
-            doc = {"format": "flow-canvas-board", "version": 1, "name": board["name"], "data": board["data"]}
-            zf.writestr("board.json", json.dumps(doc, ensure_ascii=False, indent=1))
-            for a in ids:
-                meta = store.get_asset(a) if re.fullmatch(r"[0-9a-f]{40}", a) else None
-                path = asset_path(settings, a) if meta else None
-                if not meta or not path or not path.exists():
-                    continue
-                ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif",
-                       "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov"}.get(meta["mime"], "img")
-                zf.write(path, f"assets/{a}.{ext}")
         fname = quote(re.sub(r'[\\/:*?"<>|]', "_", board["name"] or "board") + ".zip")
-        return Response(buf.getvalue(), media_type="application/zip",
+        return Response(boards_io.export_zip(settings, store, board), media_type="application/zip",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"})
-
     @app.put("/api/boards/{board_id}")
     async def save_board(board_id: str, body: BoardBody, user: str = user_dep):
         if body.data is None and body.name is None:

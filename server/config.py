@@ -35,7 +35,6 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8870
     data_dir: Path = ROOT / "data"
-    job_timeout: float = 900.0
     max_upload_bytes: int = 30 * 1024 * 1024
     # Flow-only canvas behaviour: Flow models switched off for everyone (model family keys), resolutions switched off
     disabled_sizes: tuple = ()    # e.g. "4K"
@@ -72,7 +71,7 @@ def load_settings(path: Path | None = None) -> Settings:
             setattr(s, key, str(v).strip())
     if raw.get("host"):
         s.host = str(raw["host"]).strip()
-    for key, old, cast in (("port", None, int), ("job_timeout", None, float), ("gateway_timeout", "cloud_timeout", float),
+    for key, old, cast in (("port", None, int), ("gateway_timeout", "cloud_timeout", float),
                            ("max_upload_bytes", None, int)):
         v = raw.get(key) if raw.get(key) is not None else (raw.get(old) if old else None)
         if v is not None:
