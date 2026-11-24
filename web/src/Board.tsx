@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Background, BackgroundVariant, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
+  Background, BackgroundVariant, getBezierPath, Position, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
   type Connection, type Edge, type EdgeChange, type NodeChange,
 } from '@xyflow/react'
@@ -8,7 +8,8 @@ import '@xyflow/react/dist/style.css'
 import { api, assetUrl, downloadUrl, type JobInfo, type ModelInfo, type UpscaleInfo, type UpscaleOption } from './api'
 import { CanvasContext } from './CanvasContext'
 import { copyAssetImage, imageFromHtml, recallCopied, rememberCopied } from './clipboard'
-import { BananaIcon, BrandMark, CollectionIcon, ImageIcon, VideoIcon } from './icons'
+import { BananaIcon, BrandMark, CollectionIcon, ImageIcon, MarkIcon, VideoIcon } from './icons'
+import MarkupEditor from './MarkupEditor'
 import { nodeTypes } from './nodes'
 import { pickQuality } from './quality'
 import { edgeTypes } from './DeletableEdge'
@@ -18,7 +19,7 @@ import { UserMenu } from './UserMenu'
 import { Library } from './Library'
 import type { RefInfo } from './PromptEditor'
 import {
-  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, VIDEO_WIDTH, type VGenNodeType, type VideoNodeType, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState,
+  GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, VIDEO_WIDTH, type VGenNodeType, type VideoNodeType, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState, type Markup,
 } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
@@ -157,7 +158,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [name, setName] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState('')
-  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error' | 'conflict'>('saved')
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
@@ -176,6 +177,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const edgesRef = useRef<Edge[]>([])
   const viewportRef = useRef<unknown>({ x: 0, y: 0, zoom: 1 })
   const lastSaved = useRef('')
+  const boardRev = useRef<number | 'conflict' | null>(null)   // the revision this tab last loaded / saved
+  const saveChain = useRef<Promise<void>>(Promise.resolve())
   const fileInput = useRef<HTMLInputElement>(null)
   nodesRef.current = nodes
   edgesRef.current = edges
@@ -203,6 +206,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       })
       const loadedEdges = (d.edges || []) as Edge[]
       setName(b.name)
+      boardRev.current = typeof b.rev === 'number' ? b.rev : null
       setNodes(loadedNodes)
       setEdges(loadedEdges.map(e => ({ ...edgeBase, ...e })))
       if (d.viewport) { viewportRef.current = d.viewport; rf.setViewport(d.viewport) }
@@ -214,17 +218,30 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [boardId])
 
   // ---- autosave (debounced; skips when nothing meaningful changed)
-  const saveNow = useCallback(async () => {
-    const payload = serialize(nodesRef.current, edgesRef.current, viewportRef.current)
-    const text = JSON.stringify(payload)
-    if (text === lastSaved.current) return
-    setSaveState('saving')
-    try {
-      await api.saveBoard(boardId, payload)
-      lastSaved.current = text
-      setSaveState('saved')
-    } catch { setSaveState('error') }
-  }, [boardId])
+  const saveNow = useCallback(() => {
+    // Saves run one after another (each waits for the previous revision number), and stop for good once the server
+    // says this board was changed from somewhere else: overwriting it would lose that work.
+    saveChain.current = saveChain.current.then(async () => {
+      if (boardRev.current === 'conflict') return
+      const payload = serialize(nodesRef.current, edgesRef.current, viewportRef.current)
+      const text = JSON.stringify(payload)
+      if (text === lastSaved.current) return
+      setSaveState('saving')
+      try {
+        const res = await api.saveBoard(boardId, payload, boardRev.current ?? undefined)
+        if (typeof res.rev === 'number') boardRev.current = res.rev
+        lastSaved.current = text
+        setSaveState('saved')
+      } catch (e) {
+        if ((e as { status?: number }).status === 409) {
+          boardRev.current = 'conflict'
+          setSaveState('conflict')
+          showToast('这块画板已在别处被修改，请刷新页面后再编辑', true)
+        } else setSaveState('error')
+      }
+    })
+    return saveChain.current
+  }, [boardId, showToast])
   useEffect(() => {
     if (!loaded) return
     const t = setTimeout(saveNow, 800)
@@ -683,6 +700,23 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     return () => window.removeEventListener('keydown', onKey)
   }, [addGenCard, addRefset, addVideoCard, fitAll, previewId, cloneGens, undoDelete])
 
+  // ---- markup: the edited picture becomes a new card (merged image + the layered source for later editing)
+  const [markupFor, setMarkupFor] = useState<string | null>(null)
+  const markupNode = markupFor ? (nodes.find(n => n.id === markupFor && n.type === 'image') as ImageNodeType | undefined) : undefined
+  const saveMarkup = useCallback((src: ImageNodeType, info: { id: string; w: number; h: number }, markup: Markup) => {
+    if (src.data.markup) {
+      // an already annotated card is edited in place: the merged picture and the layers are replaced
+      setNodes(ns => ns.map(n => (n.id === src.id ? ({ ...n, data: { ...n.data, assetId: info.id, w: info.w, h: info.h, markup } } as CanvasNode) : n)))
+      setMarkupFor(null)
+      return
+    }
+    const spot = findFree(nodesRef.current, src.position.x + nodeBox(src).w + 60, src.position.y, IMAGE_WIDTH, imgHeight(info.w, info.h) + 40)
+    const node = newImageNode(info.id, info.w, info.h, spot.x, spot.y)
+    node.data = { ...node.data, markup, label: '标记', prompt: src.data.prompt }
+    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true } as CanvasNode])
+    setMarkupFor(null)
+  }, [setNodes])
+
   // ---- continue from images: new generation card(s) wired to the chosen images
   const continueFrom = useCallback((imageIds: string[]) => {
     const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
@@ -753,18 +787,6 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       patchNode(genId, { jobs: [...keep, { id: uid('x'), status: 'failed', progress: '', error: (e as Error).message }] })
     }
   }, [boardId, patchNode, setNodes, setEdges])
-
-  // New video card wired to the chosen images (1 = first frame, 2 = first + last frame, more = references).
-  const continueVideo = useCallback((imageIds: string[]) => {
-    const images = nodesRef.current.filter((n): n is ImageNodeType => n.type === 'image' && imageIds.includes(n.id))
-    if (!images.length) return
-    const x = Math.max(...images.map(i => i.position.x)) + IMAGE_WIDTH + 120
-    const y = images.reduce((s, i) => s + i.position.y, 0) / images.length
-    const spot = findFree(nodesRef.current, x, y, GEN_WIDTH, GEN_EST_HEIGHT)
-    const card = newVideoGenNode(spot.x, spot.y)
-    setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...card, selected: true }] as CanvasNode[])
-    setEdges(es => [...es, ...images.map(img => ({ ...edgeBase, id: uid('e'), source: img.id, target: card.id } as Edge))])
-  }, [newVideoGenNode, setNodes, setEdges])
 
   const generateVideo = useCallback(async (genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as VGenNodeType | undefined
@@ -980,12 +1002,72 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const onConnect = useCallback((c: Connection) => setEdges(es => addEdge({ ...edgeBase, ...c }, es)), [setEdges])
   // Releasing a line anywhere on a node (not just on its small handle) connects to it: dragging from a card's
   // left side onto a reference image, or from an image's right side onto a card, both create the same edge.
+  const shiftDrag = useRef(false)
+  // While Shift is held on an image's output, its whole bundle of lines is "picked up": they leave the original
+  // spot and follow the pointer, snapping onto the output of another image when the pointer is over it.
+  const [bundle, setBundle] = useState<{ from: string; x: number; y: number; snap: string | null } | null>(null)
+  const onConnectStart = useCallback((event: MouseEvent | TouchEvent, p: { nodeId: string | null; handleType: string | null }) => {
+    shiftDrag.current = 'shiftKey' in event && event.shiftKey
+    const a = nodesRef.current.find(n => n.id === p.nodeId)
+    if (!shiftDrag.current || p.handleType !== 'source' || a?.type !== 'image' ||
+        !edgesRef.current.some(e => e.source === a.id && e.className !== 'out')) return
+    const move = (ev: MouseEvent) => {
+      const pos = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
+      const id = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.react-flow__node')?.getAttribute('data-id')
+      const b = id && id !== a.id ? nodesRef.current.find(n => n.id === id) : undefined
+      const ok = b?.type === 'image' && !!b.data.assetId && !b.data.pending
+      setBundle({ from: a.id, x: pos.x, y: pos.y, snap: ok ? b!.id : null })
+    }
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); setBundle(null) }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    const o = rf.getNode(a.id)
+    if (o) { const bx = nodeBox(o as CanvasNode); setBundle({ from: a.id, x: o.position.x + bx.w, y: o.position.y + bx.h / 2, snap: null }) }
+  }, [rf])
+  const shownEdges = useMemo(() => (bundle ? edges.map(e => (e.source === bundle.from && e.className !== 'out' ? { ...e, hidden: true } : e)) : edges), [edges, bundle])
+  const bundleLines = (() => {
+    if (!bundle) return null
+    let hx = bundle.x, hy = bundle.y
+    const sn = bundle.snap ? nodes.find(n => n.id === bundle.snap) : undefined
+    if (sn) { const b = nodeBox(sn); hx = sn.position.x + b.w; hy = sn.position.y + b.h / 2 }
+    const paths: string[] = []
+    for (const e of edges) {
+      if (e.source !== bundle.from || e.className === 'out') continue
+      const t = nodes.find(n => n.id === e.target)
+      if (!t) continue
+      const tb = nodeBox(t)
+      paths.push(getBezierPath({ sourceX: hx, sourceY: hy, sourcePosition: Position.Right, targetX: t.position.x, targetY: t.position.y + tb.h / 2, targetPosition: Position.Left })[0])
+    }
+    return { paths, hx, hy, snapped: !!sn }
+  })()
   const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, state: { isValid: boolean | null; fromNode: { id: string } | null; fromHandle: { type: string } | null }) => {
+    const shift = shiftDrag.current
+    shiftDrag.current = false
     if (state.isValid || !state.fromNode || !state.fromHandle) return
     const pt = 'changedTouches' in event ? event.changedTouches[0] : event
     const el = document.elementFromPoint(pt.clientX, pt.clientY)?.closest('.react-flow__node')
     const otherId = el?.getAttribute('data-id')
     if (!otherId || otherId === state.fromNode.id) return
+    // Shift + drag an image's output onto another image: every card that referenced the first one now references
+    // the second, in the same position of its numbering (<Picture N> keeps pointing at the same slot).
+    if (shift && state.fromHandle.type === 'source') {
+      const a = nodesRef.current.find(n => n.id === state.fromNode!.id)
+      const b = nodesRef.current.find(n => n.id === otherId)
+      if (a?.type === 'image' && b?.type === 'image' && b.data.assetId && !b.data.pending) {
+        const gens = new Set(edgesRef.current.filter(e => e.source === a.id && e.className !== 'out').map(e => e.target))
+        if (!gens.size) return
+        const had = new Set(edgesRef.current.filter(e => e.source === b.id && gens.has(e.target)).map(e => e.target))
+        setEdges(es => es.flatMap(e => {
+          if (e.source !== a.id || e.className === 'out' || !gens.has(e.target)) return [e]
+          return had.has(e.target) ? [] : [{ ...e, source: b.id, selected: false }]
+        }))
+        setNodes(ns => ns.map(n => {
+          if (!gens.has(n.id) || (n.type !== 'gen' && n.type !== 'vgen') || !n.data.refIds || had.has(n.id)) return n
+          return { ...n, data: { ...n.data, refIds: n.data.refIds.map(k => (k === `n:${a.id}` ? `n:${b.id}` : k)) } } as CanvasNode
+        }))
+        return
+      }
+    }
     // An image line released on a collection moves the picture into a slot (the one under the pointer when it is
     // empty, else the first empty one, else a new slot); the image's own incoming line is cut.
     const from = nodesRef.current.find(n => n.id === state.fromNode!.id)
@@ -1005,7 +1087,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       ? { source: otherId, target: state.fromNode.id, sourceHandle: null, targetHandle: null }
       : { source: state.fromNode.id, target: otherId, sourceHandle: null, targetHandle: null }
     if (isValidConnection(c)) onConnect(c)
-  }, [isValidConnection, onConnect, editSlots, setEdges])
+  }, [isValidConnection, onConnect, editSlots, setEdges, setNodes])
 
   // A box-select that catches no node but crosses some lines selects those lines.
   const marqueeStart = useRef<{ x: number; y: number } | null>(null)
@@ -1091,12 +1173,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   return (
     <CanvasContext.Provider value={actions}>
-      <div className="board" onDrop={onDrop} onDragOver={e => e.preventDefault()}>
+      <div className={bundle ? 'board lifting' : 'board'} onDrop={onDrop} onDragOver={e => e.preventDefault()}>
         <ReactFlow
-          nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+          nodes={nodes} edges={shownEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange} onEdgesChange={handleEdgesChange}
           onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop}
-          onConnect={onConnect} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
+          onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} isValidConnection={isValidConnection}
           onMoveEnd={(_e, vp) => { viewportRef.current = vp; void saveNow() }}
           minZoom={0.1} maxZoom={2} selectionOnDrag selectionMode={SelectionMode.Partial} panOnDrag={[1, 2]} panActivationKeyCode="Space"
           selectionKeyCode={null} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
@@ -1120,12 +1202,20 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               {guides.h.map((g, i) => <div key={`h${i}`} className="guide" style={{ left: g.x1, top: g.y, width: g.x2 - g.x1, height: 0 }} />)}
             </ViewportPortal>
           )}
+          {bundleLines && (
+            <ViewportPortal>
+              <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
+                {bundleLines.paths.map((d, i) => <path key={i} d={d} fill="none" stroke="var(--accent)" strokeWidth={2.5} strokeDasharray={bundleLines.snapped ? undefined : '7 5'} />)}
+                <circle cx={bundleLines.hx} cy={bundleLines.hy} r={bundleLines.snapped ? 9 : 7} fill="var(--accent)" stroke="#10140a" strokeWidth={2} />
+              </svg>
+            </ViewportPortal>
+          )}
           <MiniMap pannable zoomable nodeStrokeWidth={2} />
           <Panel position="top-left" className="toolbar">
             <button className="brand-btn" onClick={onBack} title="返回画板列表"><BrandMark size={32} /></button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
                    onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
-            <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}</span>
+            <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : saveState === 'conflict' ? '已在别处修改，请刷新' : '保存失败'}</span>
           </Panel>
           <Panel position="top-right" className="toolbar who"><UsageBadge /><CloudBadge /><UserMenu /></Panel>
           {layersOpen && (
@@ -1194,10 +1284,12 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                     title="在右侧新建一张图片生成卡片，并把选中的图作为它的参考图（已连好线）">
               <BananaIcon />作为参考
             </button>
-            <button onClick={() => continueVideo(selectedImages.map(n => n.id))}
-                    title="在右侧新建一张视频生成卡片，并把选中的图连上（1 张 = 首帧，2 张 = 首尾帧，更多 = 参考图）">
-              <VideoIcon />做成视频
-            </button>
+            {selectedImages.length === 1 && (
+              <button onClick={() => setMarkupFor(selectedImages[0].id)}
+                      title={(selectedImages[0] as ImageNodeType).data.markup ? '回到图层继续编辑标记，保存后直接更新这张卡片' : '在图上画笔、文字、箭头、圆圈、方框；保存后生成一张新图卡片（保留可再编辑的图层）'}>
+                <MarkIcon />{(selectedImages[0] as ImageNodeType).data.markup ? '编辑标记' : '添加标记'}
+              </button>
+            )}
             {selectedImages.length === 1 && upscale.enabled && (() => {
               // the next step above the picture's current size (an image that is already 4K offers 6K, a 6K one nothing)
               const d = (selectedImages[0] as ImageNodeType).data
@@ -1216,6 +1308,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
               </button>
             )}
           </div>
+        )}
+        {markupNode && (
+          <MarkupEditor
+            markup={markupNode.data.markup ?? { base: markupNode.data.assetId, w: markupNode.data.w, h: markupNode.data.h, shapes: [] }}
+            inPlace={!!markupNode.data.markup}
+            onClose={() => setMarkupFor(null)}
+            onSave={(info, mk) => saveMarkup(markupNode, info, mk)} />
         )}
         {toast && <div key={toast.n} className={`toast${toast.err ? ' err' : ''}`}>{toast.text}</div>}
         {dropMenu && (

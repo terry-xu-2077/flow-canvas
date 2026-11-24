@@ -35,6 +35,11 @@ export const VideoIcon = (p: IconProps) => wrap('0 0 24 24', (
   <path fillRule="evenodd" d="M4 5h11a2 2 0 0 1 2 2v2.4l3.4-2a.8.8 0 0 1 1.2.7v8.8a.8.8 0 0 1-1.2.7l-3.4-2V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 1.6a.4.4 0 0 0-.4.4v10c0 .2.2.4.4.4h11c.2 0 .4-.2.4-.4V7a.4.4 0 0 0-.4-.4H4Zm5 2.3 4 3.1-4 3.1V8.9Z" />
 ), p)
 
+/** Annotate: a pencil drawing a stroke. */
+export const MarkIcon = (p: IconProps) => wrap('0 0 24 24', (
+  <path d="M16.9 3.3a2.1 2.1 0 0 1 3 0l.8.8a2.1 2.1 0 0 1 0 3L8.6 19.2 3.5 20.5l1.3-5.1L16.9 3.3Zm1.5 1.5L6.5 16.7l-.5 2.3 2.3-.6L20.2 6.5l-1.8-1.7ZM13 20.2h8v1.6h-8v-1.6Z" />
+), p)
+
 /** Lightning bolt: credits a generation will cost. */
 export const BoltIcon = (p: IconProps) => wrap('0 0 16 16', (
   <path d="M9.2 1 3.5 9h3.7l-.9 6 6.2-8.3H8.4L9.2 1Z" />

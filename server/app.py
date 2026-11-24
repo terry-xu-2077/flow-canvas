@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .assets import AssetError, asset_path, save_image_bytes, save_video_bytes, thumbnail_path
 from .config import SIZE_ORDER, SIZE_TARGET, ROOT, Settings, load_settings
-from .db import Store
+from .db import BoardConflict, Store
 from .errors import GenError
 from .gateway import GatewayClient
 from .jobs import JobRunner, job_percent
@@ -73,6 +73,7 @@ class UpscaleBody(BaseModel):
 class BoardBody(BaseModel):
     name: Optional[str] = Field(default=None, max_length=80)
     data: Optional[dict] = None
+    base_rev: Optional[int] = None   # the revision this client loaded; a newer one saved elsewhere is not overwritten
 
 
 def resolve_size(settings: Settings, supported: list[str], size: str) -> Optional[tuple[str, Optional[int], str]]:
@@ -153,7 +154,9 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        store.fail_unfinished_jobs("服务重启，任务已中断")
+        resumed, failed = runner.resume_unfinished()
+        if resumed or failed:
+            print(f"[jobs] after restart: {resumed} resumed, {failed} marked failed", flush=True)
         yield
         await runner.shutdown()
         await gateway.close()
@@ -344,6 +347,8 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
     def _import_full(zf: zipfile.ZipFile, name: str, user: str) -> dict:
         """Restore a board exported by the zip download: board.json (nodes, edges, viewport, name) + assets/*."""
         try:
+            if zf.getinfo("board.json").file_size > 100 * 1024 ** 2:
+                raise HTTPException(400, "board.json 太大")
             doc = json.loads(zf.read("board.json").decode("utf-8"))
             data = doc["data"]
             assert isinstance(data, dict)
@@ -387,10 +392,22 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
                                              "viewport": data.get("viewport") or {"x": 40, "y": 40, "zoom": 0.6}}, title)
         return {**board, "images": len(entries)}
 
+    async def read_body(request: Request, limit: int, what: str = "文件") -> bytes:
+        """The request body, refused as soon as it is known / found to be bigger than `limit` (never buffers more than that)."""
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > limit:
+            raise HTTPException(400, f"{what}太大")
+        buf = bytearray()
+        async for chunk in request.stream():
+            buf += chunk
+            if len(buf) > limit:
+                raise HTTPException(400, f"{what}太大")
+        return bytes(buf)
+
     @app.post("/api/boards/import")
     async def import_board(request: Request, name: str = "", user: str = user_dep):
         """Create a board from a zip of images (the inverse of the zip download); images are laid out in a grid."""
-        raw = await request.body()
+        raw = await read_body(request, 2 * 1024 ** 3, "zip 文件")
         try:
             zf = zipfile.ZipFile(io.BytesIO(raw))
         except zipfile.BadZipFile:
@@ -440,6 +457,8 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
             d = n.get("data") or {}
             found = [d.get("assetId")] if n.get("type") in ("image", "video") else (
                 [s.get("assetId") for s in d.get("slots", [])] if n.get("type") == "refset" else [])
+            if isinstance(d.get("markup"), dict):  # the untouched picture under an annotated card travels with it
+                found.append(d["markup"].get("base"))
             for a in found:
                 if a and a not in ids:
                     ids.append(a)
@@ -464,10 +483,14 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
         if body.data is None and body.name is None:
             raise HTTPException(400, "没有要保存的内容")
         if body.data is not None:
-            ok = store.save_board(user, board_id, body.data, body.name)
-        else:
-            ok = store.rename_board(user, board_id, body.name or "")
-        if not ok:
+            try:
+                rev = store.save_board(user, board_id, body.data, body.name, body.base_rev)
+            except BoardConflict:
+                raise HTTPException(409, "这块画板已在别处被修改，请刷新页面后再编辑（你这里的改动没有保存）")
+            if rev is None:
+                raise HTTPException(404, "画板不存在")
+            return {"ok": True, "rev": rev}
+        if not store.rename_board(user, board_id, body.name or ""):
             raise HTTPException(404, "画板不存在")
         return {"ok": True}
 
@@ -480,7 +503,7 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GatewayCli
     # ---- assets
     @app.post("/api/assets")
     async def upload_asset(request: Request, user: str = user_dep):
-        data = await request.body()
+        data = await read_body(request, settings.max_upload_bytes, "图片")
         try:
             return save_image_bytes(settings, store, data)
         except AssetError as exc:

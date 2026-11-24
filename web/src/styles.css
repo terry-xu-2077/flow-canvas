@@ -688,3 +688,41 @@ button.has-cost .lbl { display: inline-flex; align-items: center; gap: 4px; }
 .img-label { position: absolute; left: 10px; bottom: 8px; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12px; color: #fffd; text-shadow: 0 1px 3px #000, 0 0 6px #0008; pointer-events: none; }
 .img-label.top { top: 8px; bottom: auto; }
+/* shift-dragging a bundle of reference lines: the plain connection line is replaced by the bundle overlay */
+.board.lifting .react-flow__connectionline { display: none; }
+
+/* ---- markup editor */
+.mk { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #0b0d11f2; }
+.mk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.mk-tools { display: flex; gap: 4px; }
+.mk-tools button.on { border-color: var(--accent); background: #26301a; }
+.mk-field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.mk-field input[type=color] { width: 30px; height: 26px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
+.mk-field input[type=range] { width: 110px; padding: 0; }
+.mk-num { min-width: 20px; color: var(--text); }
+.mk-sw { display: inline-flex; gap: 5px; }
+.mk-sw i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #ffffff40; cursor: pointer; }
+.mk-sw i.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.mk-gap { flex: 1; }
+.mk-err { color: #ff8a8a; font-size: 12px; }
+.mk-main { flex: 1; min-height: 0; display: flex; }
+.mk-stage { flex: 1; min-width: 0; position: relative; display: grid; place-items: center; overflow: hidden; }
+.mk-hint { color: var(--muted); }
+.mk-wrap { position: relative; box-shadow: 0 10px 40px #000a; }
+.mk-cv { display: block; touch-action: none; user-select: none; }
+.mk-cv.tool-select { cursor: default; }
+.mk-cv.tool-text { cursor: text; }
+.mk-cv.tool-pen, .mk-cv.tool-arrow, .mk-cv.tool-ellipse, .mk-cv.tool-rect { cursor: crosshair; }
+.mk-type { position: absolute; z-index: 2; min-width: 90px; margin: 0; padding: 0 2px; line-height: 1.25; font-weight: 700; font-family: sans-serif;
+  background: #ffffff22; border: 1px dashed #4da3ff; border-radius: 3px; outline: none; resize: none; overflow: hidden; white-space: pre; }
+.mk-layers { width: 210px; padding: 10px; overflow: auto; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.mk-lh { font-size: 12px; color: var(--muted); padding: 2px 4px 6px; }
+.mk-empty { font-size: 12px; color: var(--muted); padding: 4px; }
+.mk-layer { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; font-size: 13px; }
+.mk-layer:hover { background: var(--panel2); }
+.mk-layer.on { border-color: #4da3ff; background: #1a2a3d; }
+.mk-layer i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ffffff55; flex: none; }
+.mk-layer span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mk-bar button { display: inline-flex; align-items: center; gap: 6px; }
+.mk-ico { flex: none; }

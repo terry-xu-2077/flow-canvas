@@ -7,6 +7,7 @@ import json
 import statistics
 import time
 import uuid
+import weakref
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -56,6 +57,30 @@ class JobRunner:
         self._tasks: dict[str, asyncio.Task] = {}
         self._comfy_sem = asyncio.Semaphore(1)   # one GPU job at a time
         self._comfy: Optional[ComfyClient] = None
+        self._closing = False   # set while the service shuts down: running jobs are left to be resumed on the next start
+        self._upload_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+    def _upload_lock(self, asset_id: str) -> asyncio.Lock:
+        lock = self._upload_locks.get(asset_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._upload_locks[asset_id] = lock
+        return lock
+
+    def resume_unfinished(self) -> tuple[int, int]:
+        """After a restart: jobs whose gateway task was already submitted keep polling it (the platform kept working and
+        may have finished); the others never reached the gateway and are marked failed. Returns (resumed, failed)."""
+        resumed = failed = 0
+        for job in self.store.unfinished_jobs():
+            if (job["extra"].get("cloud") or {}).get("provider") and job["extra"].get("cloud_task"):
+                task = asyncio.create_task(self._run(job["id"]))
+                self._tasks[job["id"]] = task
+                task.add_done_callback(lambda _t, j=job["id"]: self._tasks.pop(j, None))
+                resumed += 1
+            else:
+                self.store.update_job(job["id"], status="failed", error="服务重启，任务已中断", finished=time.time())
+                failed += 1
+        return resumed, failed
 
     def _user_sem(self, user: str) -> asyncio.Semaphore:
         sem = self._user_sems.get(user)
@@ -109,6 +134,7 @@ class JobRunner:
         return False
 
     async def shutdown(self) -> None:
+        self._closing = True
         for task in list(self._tasks.values()):
             task.cancel()
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)
@@ -139,7 +165,8 @@ class JobRunner:
                 limit = self.settings.gateway_timeout + (self.settings.comfy_timeout if job["extra"].get("upscale_to") else 0)
                 await asyncio.wait_for(self._execute(job), timeout=limit)
         except asyncio.CancelledError:
-            self.store.update_job(job_id, status="cancelled", finished=time.time(), progress="已取消")
+            if not self._closing:   # a service shutdown leaves the job as it is, so the next start can pick it up again
+                self.store.update_job(job_id, status="cancelled", finished=time.time(), progress="已取消")
             raise
         except asyncio.TimeoutError:
             self.store.update_job(job_id, status="failed", finished=time.time(), error="生成超时")
@@ -210,30 +237,39 @@ class JobRunner:
             path = asset_path(self.settings, asset_id)
             if not asset or not path.exists():
                 raise GenError("参考图已不存在，请重新添加")
-            if asset.get("gw_ref") and await self.gateway.media_exists(asset["gw_ref"]):
-                return asset["gw_ref"]
-            mid = await self.gateway.media_upload(path.read_bytes())
-            self.store.set_gw_ref(asset_id, mid)
-            return mid
+            async with self._upload_lock(asset_id):   # cards with several images share their references: upload each picture once
+                if asset.get("gw_ref") and await self.gateway.media_exists(asset["gw_ref"]):
+                    return asset["gw_ref"]
+                asset = self.store.get_asset(asset_id) or asset
+                if asset.get("gw_ref") and await self.gateway.media_exists(asset["gw_ref"]):
+                    return asset["gw_ref"]
+                mid = await self.gateway.media_upload(path.read_bytes())
+                self.store.set_gw_ref(asset_id, mid)
+                return mid
 
-        await self._progress(job_id, "上传参考图…" if job["refs"] else "提交任务…")
         kind = c.get("kind", "video")
-        body = {"provider": c["provider"], "model": c["model"], "prompt": job["prompt"], "ratio": c.get("ratio") or "",
-                "resolution": c.get("resolution") or "", "duration": int(c.get("duration") or 0),
-                "sound": bool(c.get("sound", True)), "seed": int(c.get("seed", -1)), "quality": c.get("quality") or "",
-                "meta": {"app": "flow-canvas", "job": job_id}}
-        if kind == "image":
-            body["count"] = 1
-        if c.get("first"):
-            body["first_frame"] = await load(c["first"])
-        if c.get("last"):
-            body["last_frame"] = await load(c["last"])
-        if c.get("refs"):
-            body["ref_images"] = [await load(a) for a in c["refs"]]
-        started = time.time()
-        task = await self.gateway.submit(body, kind)
-        task_id = task["id"]
-        self.store.merge_extra(job_id, {"cloud_task": task_id})
+        resume_id = job["extra"].get("cloud_task")   # set when the service restarted while the gateway was still working on it
+        if resume_id:
+            await self._progress(job_id, "服务已重启，恢复任务…")
+            task_id, started = resume_id, job.get("started") or time.time()
+        else:
+            await self._progress(job_id, "上传参考图…" if job["refs"] else "提交任务…")
+            body = {"provider": c["provider"], "model": c["model"], "prompt": job["prompt"], "ratio": c.get("ratio") or "",
+                    "resolution": c.get("resolution") or "", "duration": int(c.get("duration") or 0),
+                    "sound": bool(c.get("sound", True)), "seed": int(c.get("seed", -1)), "quality": c.get("quality") or "",
+                    "meta": {"app": "flow-canvas", "job": job_id}}
+            if kind == "image":
+                body["count"] = 1
+            if c.get("first"):
+                body["first_frame"] = await load(c["first"])
+            if c.get("last"):
+                body["last_frame"] = await load(c["last"])
+            if c.get("refs"):
+                body["ref_images"] = list(await asyncio.gather(*[load(a) for a in c["refs"]]))
+            started = time.time()
+            task = await self.gateway.submit(body, kind)
+            task_id = task["id"]
+            self.store.merge_extra(job_id, {"cloud_task": task_id})
         failures = 0
         try:
             while True:
@@ -255,6 +291,8 @@ class JobRunner:
                 text = task.get("progress") or ("排队中" if status == "queued" else "生成中")
                 await self._progress(job_id, f"{text} · {int(pct)}%" if isinstance(pct, (int, float)) and 0 < pct < 100 else text)
         except asyncio.CancelledError:
+            if self._closing:
+                raise
             try:   # stop the remote task too (best effort; the shield lets this finish while we are being cancelled)
                 await asyncio.shield(self.gateway.cancel(task_id))
             except Exception:

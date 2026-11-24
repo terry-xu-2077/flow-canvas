@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 
+class BoardConflict(Exception):
+    """The board was saved elsewhere after this client loaded it."""
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +46,8 @@ class Store:
             self._db.executescript(SCHEMA)
             self._db.commit()
         self._migrate_users()
-        self._migrate_jobs()
+        self._migrate_assets_jobs()
+        self._migrate_boards()
         self._migrate_paid()
 
     # -- helpers
@@ -61,7 +66,23 @@ class Store:
             self._db.commit()
             return cur.rowcount
 
-    def _migrate_jobs(self) -> None:
+    def _migrate_boards(self) -> None:
+        """boards.rev counts data saves (a stale tab is told instead of overwriting); boards.imgs caches the image asset ids on the board."""
+        with self._lock:
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(boards)")}
+            if "rev" not in cols:
+                self._db.execute("ALTER TABLE boards ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+            if "imgs" not in cols:
+                self._db.execute("ALTER TABLE boards ADD COLUMN imgs TEXT")
+            self._db.commit()
+
+    @staticmethod
+    def _image_ids(data: dict) -> list[str]:
+        nodes = (data or {}).get("nodes") or []
+        return list({n["data"]["assetId"] for n in nodes
+                     if n.get("type") == "image" and isinstance(n.get("data"), dict) and n["data"].get("assetId")})
+
+    def _migrate_assets_jobs(self) -> None:
         with self._lock:
             if "gpt_ref" not in {r[1] for r in self._db.execute("PRAGMA table_info(assets)")}:
                 self._db.execute("ALTER TABLE assets ADD COLUMN gpt_ref TEXT")
@@ -126,19 +147,24 @@ class Store:
 
     # -- boards
     def list_boards(self, user: str) -> list[dict]:
-        rows = self._all("SELECT id, name, data, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))
+        # imgs is cached at save time, so the (large) board JSON is only parsed once for boards saved before the column existed
+        rows = self._all("SELECT id, name, imgs, created, updated FROM boards WHERE user=? ORDER BY updated DESC", (user,))
         for r in rows:
-            r["thumbs"] = self._recent_assets(r.pop("data"))
+            imgs = r.pop("imgs")
+            if imgs is None:
+                row = self._one("SELECT data FROM boards WHERE user=? AND id=?", (user, r["id"]))
+                try:
+                    ids = self._image_ids(json.loads((row or {}).get("data") or "{}"))
+                except ValueError:
+                    ids = []
+                self._run("UPDATE boards SET imgs=? WHERE user=? AND id=?", (json.dumps(ids), user, r["id"]))
+            else:
+                ids = json.loads(imgs)
+            r["thumbs"] = self._recent_assets(ids)
         return rows
 
-    def _recent_assets(self, blob: str, limit: int = 2) -> list[str]:
+    def _recent_assets(self, ids: list[str], limit: int = 2) -> list[str]:
         """Asset ids of the newest images on a board (imported or generated), newest first."""
-        try:
-            nodes = json.loads(blob or "{}").get("nodes") or []
-        except ValueError:
-            return []
-        ids = list({n["data"]["assetId"] for n in nodes
-                    if n.get("type") == "image" and isinstance(n.get("data"), dict) and n["data"].get("assetId")})
         if not ids:
             return []
         marks = ",".join("?" * len(ids))
@@ -179,21 +205,33 @@ class Store:
         return {"id": board_id, "name": name, "created": now, "updated": now}
 
     def get_board(self, user: str, board_id: str) -> Optional[dict]:
-        row = self._one("SELECT id, name, data, created, updated FROM boards WHERE user=? AND id=?",
+        row = self._one("SELECT id, name, data, created, updated, rev FROM boards WHERE user=? AND id=?",
                         (user, board_id))
         if row:
             row["data"] = json.loads(row["data"] or "{}")
         return row
 
-    def save_board(self, user: str, board_id: str, data: dict, name: Optional[str] = None) -> bool:
+    def save_board(self, user: str, board_id: str, data: dict, name: Optional[str] = None,
+                   base_rev: Optional[int] = None) -> Optional[int]:
+        """Store the board; returns its new revision, or None when it does not exist. When `base_rev` is given and the
+        board has been saved by someone else since, raises BoardConflict instead of overwriting."""
         blob = json.dumps(data, ensure_ascii=False)
-        if name is None:
-            n = self._run("UPDATE boards SET data=?, updated=? WHERE user=? AND id=?",
-                          (blob, time.time(), user, board_id))
-        else:
-            n = self._run("UPDATE boards SET data=?, name=?, updated=? WHERE user=? AND id=?",
-                          (blob, name, time.time(), user, board_id))
-        return n > 0
+        imgs = json.dumps(self._image_ids(data))
+        sets, args = "data=?, imgs=?, updated=?, rev=rev+1", [blob, imgs, time.time()]
+        if name is not None:
+            sets += ", name=?"
+            args.append(name)
+        where, wargs = "user=? AND id=?", [user, board_id]
+        if base_rev is not None:
+            where += " AND rev=?"
+            wargs.append(base_rev)
+        n = self._run(f"UPDATE boards SET {sets} WHERE {where}", (*args, *wargs))
+        if n == 0:
+            if base_rev is not None and self._one("SELECT 1 AS x FROM boards WHERE user=? AND id=?", (user, board_id)):
+                raise BoardConflict()
+            return None
+        row = self._one("SELECT rev FROM boards WHERE user=? AND id=?", (user, board_id))
+        return int(row["rev"]) if row else None
 
     def rename_board(self, user: str, board_id: str, name: str) -> bool:
         return self._run("UPDATE boards SET name=?, updated=? WHERE user=? AND id=?",
@@ -258,6 +296,10 @@ class Store:
             row["refs"] = json.loads(row["refs"] or "[]")
             row["extra"] = json.loads(row.get("extra") or "{}")
         return rows
+
+    def unfinished_jobs(self) -> list[dict]:
+        ids = [r["id"] for r in self._all("SELECT id FROM jobs WHERE status IN ('queued','running')")]
+        return self.get_jobs(ids)
 
     def fail_unfinished_jobs(self, message: str) -> int:
         return self._run(

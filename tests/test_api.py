@@ -27,7 +27,7 @@ def test_board_lifecycle_is_per_user(env):
     client, _ = env
     bid = client.post("/api/boards", json={"name": "分镜"}).json()["id"]
     data = {"nodes": [{"id": "n1"}], "edges": [], "viewport": {"x": 1, "y": 2, "zoom": 1}}
-    assert client.put(f"/api/boards/{bid}", json={"data": data}).json() == {"ok": True}
+    assert client.put(f"/api/boards/{bid}", json={"data": data}).json()["ok"] is True
     got = client.get(f"/api/boards/{bid}").json()
     assert got["data"] == data and got["name"] == "分镜"
     other = {"X-User": urllib.parse.quote("小红")}
