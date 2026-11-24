@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background, BackgroundVariant, getBezierPath, Position, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
@@ -135,6 +135,28 @@ function numberedRefs(refIds: string[] | undefined, connected: RefInfo[]): (RefI
   return all.map(k => connected.find(r => r.key === k))
 }
 
+/** Order reference pictures as numbered and renumber <Picture N> tags in the prompt to match the submitted list. */
+function prepareRefs(node: GenNodeType | VGenNodeType, nodes: CanvasNode[], edges: Edge[]) {
+  const numbered = numberedRefs(node.data.refIds, collectRefs(node.id, nodes, edges))
+  const refs: string[] = []
+  const position: Record<number, number> = {}
+  const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
+  numbered.forEach((r, i) => {
+    if (!r) return
+    if (node.data.onlyRefs && !mentioned.has(i + 1)) return   // "仅发送引用的图": the unmentioned ones stay home
+    let p = refs.indexOf(r.assetId)
+    if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
+    position[i + 1] = p + 1
+  })
+  let dropped = 0
+  const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
+    const p = position[Number(n)]
+    if (!p) { dropped++; return '' }
+    return `<Picture ${p}>`
+  })
+  return { refs, prompt, dropped }
+}
+
 function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
   return {
     nodes: nodes.map(n => ({ id: n.id, type: n.type, position: n.position, width: n.width, height: n.height, data: n.data })),
@@ -142,6 +164,32 @@ function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
     viewport,
   }
 }
+
+/** What a row of the layers panel shows, as plain values so that unchanged rows skip rendering while nodes are dragged. */
+function layerInfo(n: CanvasNode) {
+  const base = { id: n.id, selected: !!n.selected }
+  if (n.type === 'gen') return { ...base, kind: 'gen', text: ((n as GenNodeType).data.prompt || '空').slice(0, 16), thumb: '' }
+  if (n.type === 'vgen') return { ...base, kind: 'vgen', text: ((n as VGenNodeType).data.prompt || '空').slice(0, 16), thumb: '' }
+  if (n.type === 'video') return { ...base, kind: 'video', text: (n as VideoNodeType).data.pending ? '视频 · 生成中' : '视频', thumb: '' }
+  if (n.type === 'refset') {
+    const slots = (n as RefsetNodeType).data.slots
+    return { ...base, kind: 'refset', text: `参考集合 · ${slots.filter(s => s.assetId).length} 张`, thumb: slots.find(s => s.assetId)?.assetId ?? '' }
+  }
+  const d = (n as ImageNodeType).data
+  return { ...base, kind: 'image', text: d.pending ? '图片 · 生成中' : `图片 · ${d.w}×${d.h}`, thumb: d.assetId || '' }
+}
+
+const LayerRow = memo(function LayerRow({ id, selected, kind, text, thumb, onFocus }:
+  ReturnType<typeof layerInfo> & { onFocus: (id: string) => void }) {
+  const pic = thumb ? <img className="layer-thumb" src={assetUrl(thumb, 96)} alt="" draggable={false} /> : null
+  const icon = kind === 'gen' ? <BananaIcon className="ico-banana" />
+    : kind === 'vgen' ? <VideoIcon className="ico-banana" />
+    : kind === 'video' ? <VideoIcon className="ico-image" />
+    : kind === 'refset' ? (pic ?? <CollectionIcon className="ico-collection" />)
+    : (pic ?? <ImageIcon className="ico-image" />)
+  const label = kind === 'gen' ? `图片生成 · ${text}` : kind === 'vgen' ? `视频生成 · ${text}` : text
+  return <li className={selected ? 'on' : ''} onClick={() => onFocus(id)}>{icon} {label}</li>
+})
 
 function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }) {
   const rf = useReactFlow()
@@ -163,6 +211,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const [busyUploads, setBusyUploads] = useState(0)
   const [layersOpen, setLayersOpen] = useState(false)
   const [libOpen, setLibOpen] = useState(false)
+  const closeLib = useCallback(() => setLibOpen(false), [])
   const [toast, setToast] = useState<{ text: string; err?: boolean; n: number } | null>(null)
   const showToast = useCallback((text: string, err = false) => setToast(t => ({ text, err, n: (t?.n ?? 0) + 1 })), [])
   useEffect(() => {
@@ -178,6 +227,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const viewportRef = useRef<unknown>({ x: 0, y: 0, zoom: 1 })
   const lastSaved = useRef('')
   const boardRev = useRef<number | 'conflict' | null>(null)   // the revision this tab last loaded / saved
+  const dragging = useRef(false)   // no autosave (serialising the whole board) while a node is being dragged
   const saveChain = useRef<Promise<void>>(Promise.resolve())
   const fileInput = useRef<HTMLInputElement>(null)
   nodesRef.current = nodes
@@ -218,17 +268,17 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [boardId])
 
   // ---- autosave (debounced; skips when nothing meaningful changed)
-  const saveNow = useCallback(() => {
+  const saveNow = useCallback((keepalive = false) => {
     // Saves run one after another (each waits for the previous revision number), and stop for good once the server
     // says this board was changed from somewhere else: overwriting it would lose that work.
     saveChain.current = saveChain.current.then(async () => {
-      if (boardRev.current === 'conflict') return
+      if (boardRev.current === 'conflict' || !lastSaved.current) return   // (no lastSaved: the board has not finished loading, never save the empty canvas)
       const payload = serialize(nodesRef.current, edgesRef.current, viewportRef.current)
       const text = JSON.stringify(payload)
       if (text === lastSaved.current) return
       setSaveState('saving')
       try {
-        const res = await api.saveBoard(boardId, payload, boardRev.current ?? undefined)
+        const res = await api.saveBoard(boardId, payload, boardRev.current ?? undefined, keepalive)
         if (typeof res.rev === 'number') boardRev.current = res.rev
         lastSaved.current = text
         setSaveState('saved')
@@ -244,11 +294,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [boardId, showToast])
   useEffect(() => {
     if (!loaded) return
-    const t = setTimeout(saveNow, 800)
+    const t = setTimeout(() => { if (!dragging.current) void saveNow() }, 800)
     return () => clearTimeout(t)
   }, [nodes, edges, loaded, saveNow])
+  // Leaving the board (back button, switching boards) must not lose what was changed in the last moments.
+  useEffect(() => () => { void saveNow() }, [saveNow])
   useEffect(() => {
-    const flush = () => { void saveNow() }
+    const flush = () => { void saveNow(true) }
     window.addEventListener('pagehide', flush)
     return () => window.removeEventListener('pagehide', flush)
   }, [saveNow])
@@ -274,8 +326,14 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [loaded, models, maxCount, setNodes])
 
   // Remember the numbering of every reference connected to a card (new ones get the next free number).
+  // Dragging only changes node positions, never `data` objects or the edge list, so those frames are skipped cheaply.
+  const refSeen = useRef<{ edges: Edge[]; data: Map<string, unknown> }>({ edges: [], data: new Map() })
   useEffect(() => {
     if (!loaded) return
+    const seen = refSeen.current
+    const unchanged = seen.edges === edges && seen.data.size === nodes.length && nodes.every(n => seen.data.get(n.id) === n.data)
+    if (unchanged) return
+    refSeen.current = { edges, data: new Map(nodes.map(n => [n.id, n.data])) }
     const updates = new Map<string, { refIds: string[]; prompt: string }>()
     for (const n of nodes) {
       if (n.type !== 'gen' && n.type !== 'vgen') continue
@@ -487,6 +545,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   // solid card stays where it was. On drop the copy takes the ghost's place; the original keeps its results.
   const altDrag = useRef<{ start: Record<string, { x: number; y: number }>; copy: Record<string, string> } | null>(null)
   const onNodeDragStart = useCallback((e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
+    dragging.current = true
     altDrag.current = null
     const gens = dragged.filter(n => n.type === 'gen')
     if (!(e as MouseEvent).altKey || !gens.length) return
@@ -496,6 +555,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     setNodes(ns => ns.map(n => (start[n.id] ? { ...n, className: 'alt-moving' } : n)) as CanvasNode[])
   }, [cloneGens, setNodes])
   const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, _node: unknown, dragged: CanvasNode[]) => {
+    dragging.current = false
     const drag = altDrag.current
     altDrag.current = null
     if (!drag) return
@@ -531,38 +591,60 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [rf, setNodes, newVideoGenNode])
 
   // ---- uploads (button, drag & drop, paste)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const addToRefset = useCallback(async (id: string, files: File[]) => {
-    for (const file of files.filter(f => f.type.startsWith('image/'))) {
-      try {
-        const info = await api.uploadAsset(file)
-        const fill = { assetId: info.id, w: info.w, h: info.h, name: file.name }
-        editSlots(id, ss => {
-          const free = ss.findIndex(s => !s.assetId)
-          return free >= 0 ? ss.map((s, i) => (i === free ? { ...s, ...fill } : s)) : [...ss, { id: uid('s'), ...fill }]
-        })
-      } catch (e) { alert(`上传失败：${(e as Error).message}`) }
+    const images = files.filter(f => f.type.startsWith('image/'))
+    if (!images.length) return
+    const errs: string[] = []
+    let next = 0
+    const worker = async () => {
+      while (next < images.length) {
+        const file = images[next++]
+        try {
+          const info = await api.uploadAsset(file)
+          if (!mountedRef.current) return
+          const fill = { assetId: info.id, w: info.w, h: info.h, name: file.name }
+          editSlots(id, ss => {
+            const free = ss.findIndex(s => !s.assetId)
+            return free >= 0 ? ss.map((s, i) => (i === free ? { ...s, ...fill } : s)) : [...ss, { id: uid('s'), ...fill }]
+          })
+        } catch (e) { errs.push((e as Error).message) }
+      }
     }
-  }, [editSlots])
+    await Promise.all(Array.from({ length: Math.min(3, images.length) }, worker))
+    if (mountedRef.current && errs.length) showToast(`上传失败（${errs.length} 张）：${errs[0]}`, true)
+  }, [editSlots, showToast])
 
   const addImages = useCallback(async (files: File[], at?: { x: number; y: number }) => {
     const images = files.filter(f => f.type.startsWith('image/'))
     if (!images.length) return
     setBusyUploads(c => c + images.length)
-    let offset = 0
-    for (const file of images) {
-      try {
-        const info = await api.uploadAsset(file)
-        const base = at ?? rf.screenToFlowPosition({ x: window.innerWidth / 2 - 140, y: window.innerHeight / 2 - 100 })
-        const spot = findFree(nodesRef.current, base.x + offset, base.y, IMAGE_WIDTH, imgHeight(info.w, info.h) + 40)
-        offset += 30
-        setNodes(ns => [...ns, newImageNode(info.id, info.w, info.h, spot.x, spot.y)])
-      } catch (e) {
-        alert(`上传失败：${(e as Error).message}`)
-      } finally {
-        setBusyUploads(c => c - 1)
+    const errs: string[] = []
+    let next = 0
+    const worker = async () => {
+      while (next < images.length) {
+        const idx = next++
+        const file = images[idx]
+        try {
+          const info = await api.uploadAsset(file)
+          if (!mountedRef.current) return
+          const base = at ?? rf.screenToFlowPosition({ x: window.innerWidth / 2 - 140, y: window.innerHeight / 2 - 100 })
+          const spot = findFree(nodesRef.current, base.x + idx * 30, base.y, IMAGE_WIDTH, imgHeight(info.w, info.h) + 40)
+          setNodes(ns => [...ns, newImageNode(info.id, info.w, info.h, spot.x, spot.y)])
+        } catch (e) {
+          errs.push((e as Error).message)
+        } finally {
+          if (mountedRef.current) setBusyUploads(c => c - 1)
+        }
       }
     }
-  }, [rf, setNodes])
+    await Promise.all(Array.from({ length: Math.min(3, images.length) }, worker))
+    if (mountedRef.current && errs.length) showToast(`上传失败（${errs.length} 张）：${errs[0]}`, true)
+  }, [rf, setNodes, showToast])
 
   // an image that already exists on the server (recycle bin) goes onto the canvas without uploading
   const placeAsset = useCallback((item: { asset: string; w: number; h: number }) => {
@@ -597,7 +679,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const text = cd?.getData('text/plain') ?? ''
       if (html.includes('<img')) {
         e.preventDefault()
-        void imageFromHtml(html).then(f => { if (f) put([f]) })
+        void imageFromHtml(html).then(f => { if (f) put([f]) }).catch(() => showToast('无法读取粘贴的图片', true))
         return
       }
       const copied = text.trim() ? [] : recallCopied()
@@ -628,9 +710,9 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     if (!ns.length && !es.length) return
     // a result placeholder (or a card with running jobs) that is deleted must not keep queueing: the server drops those jobs
     for (const n of ns) {
-      if (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId) void api.cancelJob((n as ImageNodeType).data.jobId!)
-      if (n.type === 'video' && n.data.pending && n.data.jobId) void api.cancelJob(n.data.jobId)
-      if (n.type === 'gen' || n.type === 'vgen') (n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
+      if (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.jobId) api.cancelJob((n as ImageNodeType).data.jobId!).catch(() => {})
+      if (n.type === 'video' && n.data.pending && n.data.jobId) api.cancelJob(n.data.jobId).catch(() => {})
+      if (n.type === 'gen' || n.type === 'vgen') (n as GenNodeType).data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { api.cancelJob(j.id).catch(() => {}) })
     }
     undoStack.current = [...undoStack.current.slice(-29), { nodes: ns.filter(n => !((n.type === 'image' || n.type === 'video') && n.data.pending)), edges: es }]
     showToast(ns.length ? `已删除 ${ns.length} 个节点，Ctrl+Z 撤销` : '已删除连线，Ctrl+Z 撤销')
@@ -733,25 +815,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const generate = useCallback(async (genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
     if (!node || !node.data.prompt.trim()) return
-    // Submit the images in number order and renumber the tags to match: <Picture N> in the text must name the
-    // same image that ends up as the N-th reference of the request.
-    const numbered = numberedRefs(node.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
-    const refs: string[] = []
-    const position: Record<number, number> = {}
-    const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
-    numbered.forEach((r, i) => {
-      if (!r) return
-      if (node.data.onlyRefs && !mentioned.has(i + 1)) return   // "仅发送引用的图": the unmentioned ones stay home
-      let p = refs.indexOf(r.assetId)
-      if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
-      position[i + 1] = p + 1
-    })
-    let dropped = 0
-    const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
-      const p = position[Number(n)]
-      if (!p) { dropped++; return '' }
-      return `<Picture ${p}>`
-    })
+    const { refs, prompt, dropped } = prepareRefs(node, nodesRef.current, edgesRef.current)
     try {
       // what the card shows is what is sent: a model / size / quality this user may not use falls back to the first allowed one
       const m = modelsRef.current.find(x => x.key === node.data.model) ?? modelsRef.current.find(x => x.legacy === node.data.model) ?? modelsRef.current[0]
@@ -791,24 +855,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   const generateVideo = useCallback(async (genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as VGenNodeType | undefined
     if (!node) return
-    // same numbering rules as the image card: pictures go out in number order and <Picture N> is renumbered to match
-    const numbered = numberedRefs(node.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
-    const refs: string[] = []
-    const position: Record<number, number> = {}
-    const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
-    numbered.forEach((r, i) => {
-      if (!r) return
-      if (node.data.onlyRefs && !mentioned.has(i + 1)) return
-      let p = refs.indexOf(r.assetId)
-      if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
-      position[i + 1] = p + 1
-    })
-    let dropped = 0
-    const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
-      const p = position[Number(n)]
-      if (!p) { dropped++; return '' }
-      return `<Picture ${p}>`
-    })
+    const { refs, prompt, dropped } = prepareRefs(node, nodesRef.current, edgesRef.current)
     if (!prompt && !refs.length) return
     try {
       const ids = await api.createVideoJobs({
@@ -888,11 +935,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   /** Progress of enlarge jobs, which belong to a placeholder image instead of a generation card. */
   const applyUpscaleUpdates = useCallback((updates: JobInfo[]) => {
-    const gone = new Set<string>()
+    const gone = new Set(updates.filter(u => u.status === 'cancelled').map(u => `img_${u.id}`))
     setNodes(ns => ns.map(n => {
       const info = updates.find(u => `img_${u.id}` === n.id)
-      if (!info || n.type !== 'image') return n
-      if (info.status === 'cancelled') { gone.add(n.id); return n }
+      if (!info || n.type !== 'image' || gone.has(n.id)) return n
       const d = (n as ImageNodeType).data
       if (info.status === 'done' && info.result_asset) {
         const w = info.result_w || d.w, h = info.result_h || d.h
@@ -907,7 +953,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
 
   const cancelJobs = useCallback((genId: string) => {
     const node = nodesRef.current.find(n => n.id === genId) as GenNodeType | VGenNodeType | undefined
-    node?.data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { void api.cancelJob(j.id) })
+    node?.data.jobs.filter(j => !FINAL.has(j.status)).forEach(j => { api.cancelJob(j.id).catch(() => {}) })
   }, [])
 
   const applyJobUpdates = useCallback((updates: JobInfo[]) => {
@@ -963,33 +1009,61 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     if (addedEdges.length) setEdges(es => [...es, ...addedEdges.filter(e => !es.some(x => x.id === e.id))])
   }, [setNodes, setEdges])
 
+  // Job polling: one request chain (the next round is scheduled when the previous one has finished), slower while the tab
+  // is hidden, backing off after errors. Jobs the server does not know any more are marked failed instead of waiting forever.
   useEffect(() => {
     if (!loaded) return
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let failures = 0
+    const missing = new Map<string, number>()
+    const cardJobs = () => nodesRef.current.flatMap(n => (n.type === 'gen' || n.type === 'vgen' ? (n as GenNodeType).data.jobs.map(j => ({ ...j, node: n.id })) : []))
     const tick = async () => {
-      const upIds = nodesRef.current.flatMap(n => (n.type === 'image' && (n as ImageNodeType).data.pending && (n as ImageNodeType).data.upscale && (n as ImageNodeType).data.jobId
-        ? [(n as ImageNodeType).data.jobId as string] : []))
-      const pending = [...nodesRef.current.flatMap(n => (n.type === 'gen' || n.type === 'vgen' ? (n as GenNodeType).data.jobs : []))
-        .filter(j => !FINAL.has(j.status)).map(j => j.id), ...upIds]
-      if (!pending.length) return
+      let delay = document.hidden ? 5000 : 1500
       try {
-        const all = await api.jobs(pending.slice(0, 64))
-        const mine = new Set(upIds)
-        const upUpdates = all.filter(u => mine.has(u.id))
-        if (upUpdates.length) applyUpscaleUpdates(upUpdates)
-        const updates = all.filter(u => !mine.has(u.id))
-        const changed = updates.filter(u => {
-          const cur = nodesRef.current.flatMap(n => (n.type === 'gen' || n.type === 'vgen' ? (n as GenNodeType).data.jobs : [])).find(j => j.id === u.id)
-          return cur && (cur.status !== u.status || cur.progress !== u.progress || u.status === 'done')
+        const upIds = nodesRef.current.flatMap(n => {
+          const d = n.type === 'image' ? (n as ImageNodeType).data : null
+          return d && d.pending && d.upscale && d.jobId && !FINAL.has(d.status ?? '') ? [d.jobId] : []
         })
-        const videoCards = new Set(nodesRef.current.filter(n => n.type === 'vgen').map(n => n.id))
-        const videoChanged = changed.filter(u => u.node && videoCards.has(u.node))
-        const imageChanged = changed.filter(u => !(u.node && videoCards.has(u.node)))
-        if (imageChanged.length) applyJobUpdates(imageChanged)
-        if (videoChanged.length) applyVideoUpdates(videoChanged)
-      } catch { /* transient network error: try again next tick */ }
+        const wanted = [...cardJobs().filter(j => !FINAL.has(j.status)).map(j => j.id), ...upIds]
+        if (wanted.length) {
+          const all: JobInfo[] = []
+          for (let i = 0; i < wanted.length; i += 64) all.push(...await api.jobs(wanted.slice(i, i + 64)))
+          failures = 0
+          const known = new Set(all.map(u => u.id))
+          for (const id of wanted) {
+            if (known.has(id)) { missing.delete(id); continue }
+            const n = (missing.get(id) ?? 0) + 1
+            missing.set(id, n)
+            if (n >= 4) {
+              all.push({ id, node: cardJobs().find(j => j.id === id)?.node ?? null, status: 'failed', progress: '', error: '任务已不存在（服务器上没有这条记录）',
+                         result_asset: null, model: '', result_w: null, result_h: null })
+              missing.delete(id)
+            }
+          }
+          const mine = new Set(upIds)
+          const upUpdates = all.filter(u => mine.has(u.id))
+          if (upUpdates.length) applyUpscaleUpdates(upUpdates)
+          const jobById = new Map(cardJobs().map(j => [j.id, j]))
+          const changed = all.filter(u => {
+            if (mine.has(u.id)) return false
+            const cur = jobById.get(u.id)
+            return cur && (cur.status !== u.status || cur.progress !== u.progress || u.status === 'done')
+          })
+          const videoCards = new Set(nodesRef.current.filter(n => n.type === 'vgen').map(n => n.id))
+          const videoChanged = changed.filter(u => u.node && videoCards.has(u.node))
+          const imageChanged = changed.filter(u => !(u.node && videoCards.has(u.node)))
+          if (imageChanged.length) applyJobUpdates(imageChanged)
+          if (videoChanged.length) applyVideoUpdates(videoChanged)
+        }
+      } catch {
+        failures++   // transient network error (or the server restarting): back off a little, then try again
+        delay = Math.min(15000, 1500 * 2 ** Math.min(failures, 4))
+      }
+      if (!stopped) timer = setTimeout(tick, delay)
     }
-    const t = setInterval(tick, 1500)
-    return () => clearInterval(t)
+    timer = setTimeout(tick, 1500)
+    return () => { stopped = true; if (timer) clearTimeout(timer) }
   }, [loaded, applyJobUpdates, applyUpscaleUpdates, applyVideoUpdates])
 
   // ---- canvas wiring
@@ -1006,7 +1080,10 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   // While Shift is held on an image's output, its whole bundle of lines is "picked up": they leave the original
   // spot and follow the pointer, snapping onto the output of another image when the pointer is over it.
   const [bundle, setBundle] = useState<{ from: string; x: number; y: number; snap: string | null } | null>(null)
+  const connectCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { connectCleanupRef.current?.() }, [])
   const onConnectStart = useCallback((event: MouseEvent | TouchEvent, p: { nodeId: string | null; handleType: string | null }) => {
+    connectCleanupRef.current?.()
     shiftDrag.current = 'shiftKey' in event && event.shiftKey
     const a = nodesRef.current.find(n => n.id === p.nodeId)
     if (!shiftDrag.current || p.handleType !== 'source' || a?.type !== 'image' ||
@@ -1018,9 +1095,19 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
       const ok = b?.type === 'image' && !!b.data.assetId && !b.data.pending
       setBundle({ from: a.id, x: pos.x, y: pos.y, snap: ok ? b!.id : null })
     }
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); setBundle(null) }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('blur', up)
+      window.removeEventListener('pointercancel', up)
+      connectCleanupRef.current = null
+      setBundle(null)
+    }
+    connectCleanupRef.current = up
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    window.addEventListener('pointercancel', up)
     const o = rf.getNode(a.id)
     if (o) { const bx = nodeBox(o as CanvasNode); setBundle({ from: a.id, x: o.position.x + bx.w, y: o.position.y + bx.h / 2, snap: null }) }
   }, [rf])
@@ -1122,11 +1209,13 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }, [onEdgesChange])
 
   const duplicate = useCallback((id: string) => cloneGens([id]), [cloneGens])
+  // Read from refs (not from state) so these functions, and with them the context value, stay the same while nodes are
+  // dragged; a card that needs fresh numbers re-renders from its own signature of incoming lines (see useRefSignature).
   const refsOf = useCallback((genId: string) => {
-    const gen = nodes.find(n => n.id === genId) as GenNodeType | undefined
-    return numberedRefs(gen?.data.refIds, collectRefs(genId, nodes, edges))
-  }, [nodes, edges])
-  const refCount = useCallback((genId: string) => collectRefs(genId, nodes, edges).length, [nodes, edges])
+    const gen = nodesRef.current.find(n => n.id === genId) as GenNodeType | undefined
+    return numberedRefs(gen?.data.refIds, collectRefs(genId, nodesRef.current, edgesRef.current))
+  }, [])
+  const refCount = useCallback((genId: string) => collectRefs(genId, nodesRef.current, edgesRef.current).length, [])
 
   // One request per card at a time: the button answers at once ("提交中…") and a second click while it is on its way is ignored
   const once = useCallback((run: (id: string) => Promise<void>) => async (genId: string) => {
@@ -1214,7 +1303,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
           <Panel position="top-left" className="toolbar">
             <button className="brand-btn" onClick={onBack} title="返回画板列表"><BrandMark size={32} /></button>
             <input className="board-name" value={name} onChange={e => setName(e.target.value)}
-                   onBlur={() => { if (name.trim()) void api.renameBoard(boardId, name.trim()) }} />
+                   onBlur={() => { if (name.trim()) api.renameBoard(boardId, name.trim()).catch(e => showToast(`重命名失败：${(e as Error).message}`, true)) }} />
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : saveState === 'conflict' ? '已在别处修改，请刷新' : '保存失败'}</span>
           </Panel>
           <Panel position="top-right" className="toolbar who"><UsageBadge /><CloudBadge /><UserMenu /></Panel>
@@ -1224,24 +1313,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
                 <button className="icon" onClick={() => setLayersOpen(false)}>✕</button></div>
               {nodes.length === 0 && <div className="hint">画布上还没有内容</div>}
               <ul>
-                {[...nodes].reverse().map(n => (
-                  <li key={n.id} className={n.selected ? 'on' : ''} onClick={() => focusNode(n.id)}>
-                    {(() => {
-                      const thumb = n.type === 'image' ? (n as ImageNodeType).data.assetId
-                        : n.type === 'refset' ? (n as RefsetNodeType).data.slots.find(s => s.assetId)?.assetId : undefined
-                      const pic = thumb ? <img className="layer-thumb" src={assetUrl(thumb, 96)} alt="" draggable={false} /> : null
-                      return n.type === 'gen'
-                        ? <><BananaIcon className="ico-banana" /> 图片生成 · {((n as GenNodeType).data.prompt || '空').slice(0, 16)}</>
-                        : n.type === 'vgen'
-                        ? <><VideoIcon className="ico-banana" /> 视频生成 · {((n as VGenNodeType).data.prompt || '空').slice(0, 16)}</>
-                        : n.type === 'video'
-                        ? <><VideoIcon className="ico-image" /> {(n as VideoNodeType).data.pending ? '视频 · 生成中' : '视频'}</>
-                        : n.type === 'refset'
-                          ? <>{pic ?? <CollectionIcon className="ico-collection" />} 参考集合 · {(n as RefsetNodeType).data.slots.filter(s => s.assetId).length} 张</>
-                          : <>{pic ?? <ImageIcon className="ico-image" />} {(n as ImageNodeType).data.pending ? '图片 · 生成中' : `图片 · ${(n as ImageNodeType).data.w}×${(n as ImageNodeType).data.h}`}</>
-                    })()}
-                  </li>
-                ))}
+                {[...nodes].reverse().map(n => <LayerRow key={n.id} {...layerInfo(n)} onFocus={focusNode} />)}
               </ul>
             </Panel>
           )}
@@ -1276,7 +1348,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             点「＋ 图片生成」写提示词开始生成<br />也可以把图片拖进来、或 Ctrl+V 粘贴，再从图片右侧圆点连线到卡片作为参考图
           </div>
         )}
-        {libOpen && <Library onClose={() => setLibOpen(false)} onPlace={placeAsset} onPreview={setPreviewId} />}
+        {libOpen && <Library onClose={closeLib} onPlace={placeAsset} onPreview={setPreviewId} />}
         {selBar && (
           <div className="selbar selbar-float" style={{ left: selBar.left, top: selBar.top }}>
             已选 {selectedImages.length} 张图

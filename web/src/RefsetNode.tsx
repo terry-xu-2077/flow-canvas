@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { api, assetUrl } from './api'
 import { useCanvas } from './CanvasContext'
@@ -32,7 +32,7 @@ function bestGrid(n: number, w: number, h: number): { cols: number; rows: number
 }
 
 /** A reference collection: ordered image slots wired as one block into any number of generation cards. */
-export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
+export const RefsetNode = memo(function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
   const canvas = useCanvas()
   const { deleteElements } = useReactFlow()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -187,4 +187,4 @@ export function RefsetNode({ id, data, selected }: NodeProps<RefsetNodeType>) {
       </div>
     </>
   )
-}
+})

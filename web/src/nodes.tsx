@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Handle, NodeResizer, Position, useReactFlow, useStore, type NodeProps } from '@xyflow/react'
 import { qualityOptions, pickQuality, QUALITY_ZH } from './quality'
 import { api, assetUrl, downloadUrl, type FreeInfo, type ModelInfo, type VideoModel, type VideoModelInfo, type VideoQuote } from './api'
 import { useCanvas } from './CanvasContext'
@@ -9,6 +9,23 @@ import { RefsetNode } from './RefsetNode'
 import { type GenNodeType, type ImageNodeType, type VGenNodeType, type VideoNodeType } from './types'
 
 const FINAL = new Set(['done', 'failed', 'cancelled'])
+
+/** A string that changes only when what is wired into card `id` changes (its reference pictures and their order). The
+ *  canvas context stays the same while nodes are dragged, so a card re-renders from this instead of from every move. */
+function useRefSignature(id: string): string {
+  return useStore(s => {
+    let sig = ''
+    for (const e of s.edges) {
+      if (e.target !== id) continue
+      const src = s.nodeLookup.get(e.source)
+      const d = src?.data as Record<string, any> | undefined
+      if (src?.type === 'image') sig += `|n:${src.id}:${d?.assetId}:${d?.w}x${d?.h}:${String(d?.prompt ?? '').slice(0, 24)}`
+      else if (src?.type === 'refset') sig += `|r:${src.id}:${(d?.slots ?? []).map((x: any) => `${x.id}.${x.assetId ?? ''}.${x.w ?? ''}.${x.h ?? ''}.${x.name ?? ''}`).join(',')}`
+      else sig += `|?${e.source}`
+    }
+    return sig
+  })
+}
 
 /** Credits one generation will cost, shown inside the generate button: a bolt and the number (∞ when the slow unlimited mode
  *  covers it); nothing while it is being asked, and a dash when the price could not be read. */
@@ -140,7 +157,7 @@ function ModelMenu({ models, value, active, onPick, onOpen }: {
   )
 }
 
-export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
+export const GenNode = memo(function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const canvas = useCanvas()
   const [open, setOpen] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
@@ -150,7 +167,9 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
   const size = model?.sizes.includes(data.size) ? data.size : (model?.sizes[0] ?? data.size)   // what is shown is what is sent
   const quality = pickQuality(model, size, data.quality)
   const qOptions = qualityOptions(model, size)
-  const refs = canvas.refCount(id)
+  const refSig = useRefSignature(id)
+  const refs = useMemo(() => canvas.refCount(id), [canvas.refCount, id, refSig])   // eslint-disable-line react-hooks/exhaustive-deps
+  const refList = useMemo(() => canvas.refsOf(id), [canvas.refsOf, id, refSig, data.refIds])   // eslint-disable-line react-hooks/exhaustive-deps
   const sentCount = new Set(Array.from(data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => m[1])).size
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
   // progress lives under each result placeholder; only a submit that failed before any job existed is shown here
@@ -216,7 +235,7 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
         <button className="icon nodrag copy-btn" title="复制卡片（Ctrl+D；按住 Alt 拖动卡片也可复制），保留参考引用线" onClick={() => canvas.duplicate(id)}>⧉</button>
       </div>
       <PromptEditor
-        value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}
+        value={data.prompt} refs={refList} onChange={v => patch({ prompt: v })}
         onSubmit={() => { if (canRun) canvas.generate(id) }}
       />
       <div className="foot nodrag">
@@ -281,9 +300,9 @@ export function GenNode({ id, data, selected }: NodeProps<GenNodeType>) {
     </div>
     </>
   )
-}
+})
 
-export function ImageNode({ data, selected }: NodeProps<ImageNodeType>) {
+export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<ImageNodeType>) {
   const canvas = useCanvas()
   if (data.pending) {
     const failed = data.status === 'failed'
@@ -315,7 +334,7 @@ export function ImageNode({ data, selected }: NodeProps<ImageNodeType>) {
     </div>
     </>
   )
-}
+})
 
 // ---------------------------------------------------------------- video generation (terry2api: 小云雀 / LibTV / Lovart)
 type VideoList = { enabled: boolean; models: VideoModel[]; errors: Record<string, string>; locked?: boolean }
@@ -355,7 +374,7 @@ function durationChoices(info?: VideoModelInfo | null): number[] | null {
 
 const DEFAULT_VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 
-export function VideoGenNode({ id, data, selected }: NodeProps<VGenNodeType>) {
+export const VideoGenNode = memo(function VideoGenNode({ id, data, selected }: NodeProps<VGenNodeType>) {
   const canvas = useCanvas()
   const [open, setOpen] = useState(false)
   const [list, setList] = useState<VideoList | null>(null)
@@ -367,7 +386,9 @@ export function VideoGenNode({ id, data, selected }: NodeProps<VGenNodeType>) {
   const models = list?.models ?? []
   const model = models.find(m => m.key === data.model) ?? models[0]
   const running = data.jobs.some(j => !FINAL.has(j.status))
-  const refs = canvas.refCount(id)
+  const refSig = useRefSignature(id)
+  const refs = useMemo(() => canvas.refCount(id), [canvas.refCount, id, refSig])   // eslint-disable-line react-hooks/exhaustive-deps
+  const refList = useMemo(() => canvas.refsOf(id), [canvas.refsOf, id, refSig, data.refIds])   // eslint-disable-line react-hooks/exhaustive-deps
   const sentCount = new Set(Array.from(data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => m[1])).size
   const patch = (p: Record<string, unknown>) => canvas.patchNode(id, p)
   const visibleJobs = data.jobs.filter(j => j.id.startsWith('x') && j.status === 'failed')
@@ -462,7 +483,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps<VGenNodeType>) {
         <span className="node-title"><VideoIcon className="ico-banana" />视频生成 · {modeHint}{refs > 0 && data.onlyRefs ? ` · 发送 ${sentCount}` : ''}</span>
       </div>
       <PromptEditor
-        value={data.prompt} refs={canvas.refsOf(id)} onChange={v => patch({ prompt: v })}
+        value={data.prompt} refs={refList} onChange={v => patch({ prompt: v })}
         onSubmit={() => { if (canRun) canvas.generateVideo(id) }}
       />
       <div className="foot nodrag">
@@ -544,9 +565,9 @@ export function VideoGenNode({ id, data, selected }: NodeProps<VGenNodeType>) {
     </div>
     </>
   )
-}
+})
 
-export function VideoNode({ data, selected }: NodeProps<VideoNodeType>) {
+export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<VideoNodeType>) {
   if (data.pending) {
     const failed = data.status === 'failed'
     return (
@@ -577,6 +598,6 @@ export function VideoNode({ data, selected }: NodeProps<VideoNodeType>) {
     </div>
     </>
   )
-}
+})
 
 export const nodeTypes = { gen: GenNode, image: ImageNode, refset: RefsetNode, vgen: VideoGenNode, video: VideoNode }

@@ -86,7 +86,15 @@ export const api = {
   boards: () => call<{ boards: BoardMeta[] }>('/api/boards').then(r => r.boards),
   createBoard: (name: string) => call<BoardMeta>('/api/boards', json('POST', { name })),
   getBoard: (id: string) => call<{ id: string; name: string; data: any; rev?: number }>(`/api/boards/${id}`),
-  saveBoard: (id: string, data: unknown, baseRev?: number) => call<{ ok: boolean; rev?: number }>(`/api/boards/${id}`, json('PUT', { data, base_rev: baseRev })),
+  saveBoard: (id: string, data: unknown, baseRev?: number, keepalive = false) => {
+    const body = JSON.stringify({ data, base_rev: baseRev })
+    return call<{ ok: boolean; rev?: number }>(`/api/boards/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: keepalive && body.length < 60000,
+    })
+  },
   renameBoard: (id: string, name: string) => call<{ ok: boolean }>(`/api/boards/${id}`, json('PUT', { name })),
   /** Download every image of a board as a zip (fetched with the user header, then saved through a temporary link). */
   downloadBoardZip: async (id: string, name: string) => {

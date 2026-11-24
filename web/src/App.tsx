@@ -84,8 +84,12 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
   const create = async () => {
     const name = prompt('画板名称', '未命名画板')
     if (name === null) return
-    const b = await api.createBoard(name.trim() || '未命名画板')
-    onOpen(b.id)
+    try {
+      const b = await api.createBoard(name.trim() || '未命名画板')
+      onOpen(b.id)
+    } catch (err) {
+      setError(`创建画板失败：${(err as Error).message}`)
+    }
   }
   return (
     <div className="list">
@@ -127,7 +131,9 @@ function BoardList({ onOpen, onLogout }: { onOpen: (id: string) => void; onLogou
             </button>
             <button className="icon" title="删除画板" onClick={async e => {
               e.stopPropagation()
-              if (confirm(`删除画板「${b.name}」？此操作无法恢复。`)) { await api.deleteBoard(b.id); refresh() }
+              if (!confirm(`删除画板「${b.name}」？此操作无法恢复。`)) return
+              try { await api.deleteBoard(b.id); refresh() }
+              catch (err) { setError(`删除画板失败：${(err as Error).message}`) }
             }}>✕</button>
           </div>
         ))}
