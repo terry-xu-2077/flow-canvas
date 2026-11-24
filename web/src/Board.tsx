@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background, BackgroundVariant, getBezierPath, Position, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal,
   addEdge, useEdgesState, useNodesState, useReactFlow, useViewport,
@@ -17,179 +17,15 @@ import UsageBadge from './UsageBadge'
 import CloudBadge from './CloudBadge'
 import { UserMenu } from './UserMenu'
 import { Library } from './Library'
-import type { RefInfo } from './PromptEditor'
+import { LayersPanel } from './board/LayersPanel'
+import {
+  edgeBase, FINAL, findFree, GEN_EST_HEIGHT, type Guides, imgHeight, MAX_CARD_WIDTH, NO_GUIDES,
+  nodeBox, ratioSize, RESULT_WIDTH, resultHeight, resultWidth, SIZE_LONG, snapToNodes, uid, videoRatio,
+} from './board/geometry'
+import { collectRefs, numberedRefs, prepareRefs, serialize } from './board/refs'
 import {
   GEN_HEIGHT, GEN_WIDTH, IMAGE_WIDTH, REFSET_WIDTH, VIDEO_WIDTH, type VGenNodeType, type VideoNodeType, type CanvasActions, type RefsetNodeType, type Slot, type CanvasNode, type GenNodeType, type ImageNodeType, type JobState, type Markup,
 } from './types'
-
-const FINAL = new Set(['done', 'failed', 'cancelled'])
-const GEN_EST_HEIGHT = 290
-const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
-const imgHeight = (w: number, h: number) => Math.round((IMAGE_WIDTH * h) / w)
-// images made by a generation card are larger than the default image size (about the size users resized them to)
-const RESULT_WIDTH = 540
-/** No image card is ever wider than this: a 6K or enlarged result must stay easy to grab and resize on the canvas. */
-const MAX_CARD_WIDTH = 720
-/** A result card is 540 px wide up to 2K; bigger pictures (4K, 6K) get a somewhat bigger card, capped at MAX_CARD_WIDTH. */
-const resultWidth = (w: number, h: number) => Math.min(MAX_CARD_WIDTH, Math.round(RESULT_WIDTH * Math.max(1, Math.max(w, h) / 2752)))
-const resultHeight = (w: number, h: number, width = RESULT_WIDTH) => Math.round((width * h) / w)
-const SIZE_LONG: Record<string, number> = { '1K': 1376, '2K': 2752, '4K': 4096, '6K': 6144 }
-/** Aspect of a video card's ratio setting; "adaptive" and the like fall back to 16:9. */
-const videoRatio = (ratio: string): [number, number] => {
-  const [w, h] = ratio.split(':').map(Number)
-  return w > 0 && h > 0 ? [w, h] : [16, 9]
-}
-const ratioSize = (ratio: string): [number, number] => {
-  const [w, h] = ratio.split(':').map(Number)
-  return w > 0 && h > 0 ? [w, h] : [1, 1]
-}
-
-function nodeBox(n: CanvasNode) {
-  const w = n.width ?? n.measured?.width
-  if (n.type === 'image') {
-    const width = w ?? IMAGE_WIDTH
-    return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
-  }
-  if (n.type === 'video') {
-    const width = w ?? VIDEO_WIDTH
-    return { w: width, h: n.height ?? n.measured?.height ?? Math.round((width * n.data.h) / n.data.w) }
-  }
-  if (n.type === 'refset') return { w: w ?? REFSET_WIDTH, h: n.height ?? n.measured?.height ?? 200 }
-  return { w: w ?? GEN_WIDTH, h: n.height ?? n.measured?.height ?? GEN_EST_HEIGHT }
-}
-
-/** Nudge a box down/right until it no longer overlaps an existing node. */
-function findFree(nodes: CanvasNode[], x: number, y: number, w: number, h: number) {
-  const gap = 24
-  for (let i = 0; i < 60; i++) {
-    const hit = nodes.find(n => {
-      const b = nodeBox(n)
-      return x < n.position.x + b.w + gap && x + w + gap > n.position.x &&
-             y < n.position.y + b.h + gap && y + h + gap > n.position.y
-    })
-    if (!hit) return { x, y }
-    y = hit.position.y + nodeBox(hit).h + gap
-  }
-  return { x, y }
-}
-
-const edgeBase: Partial<Edge> = { style: { strokeWidth: 2 } }
-
-interface Guides { v: { x: number; y1: number; y2: number }[]; h: { y: number; x1: number; x2: number }[] }
-const NO_GUIDES: Guides = { v: [], h: [] }
-
-/** Snap a dragged node's edges/centre to those of the other nodes (within `thr` flow units); also returns the guide lines. */
-function snapToNodes(moving: CanvasNode, pos: { x: number; y: number }, others: CanvasNode[], thr: number) {
-  const b = nodeBox(moving)
-  const xs = [pos.x, pos.x + b.w / 2, pos.x + b.w]
-  const ys = [pos.y, pos.y + b.h / 2, pos.y + b.h]
-  let dx: number | null = null, dy: number | null = null
-  for (const o of others) {
-    const ob = nodeBox(o)
-    const oxs = [o.position.x, o.position.x + ob.w / 2, o.position.x + ob.w]
-    const oys = [o.position.y, o.position.y + ob.h / 2, o.position.y + ob.h]
-    for (const x of xs) for (const ox of oxs) if (Math.abs(ox - x) < thr && (dx === null || Math.abs(ox - x) < Math.abs(dx))) dx = ox - x
-    for (const y of ys) for (const oy of oys) if (Math.abs(oy - y) < thr && (dy === null || Math.abs(oy - y) < Math.abs(dy))) dy = oy - y
-  }
-  const snapped = { x: pos.x + (dx ?? 0), y: pos.y + (dy ?? 0) }
-  const guides: Guides = { v: [], h: [] }
-  const sxs = [snapped.x, snapped.x + b.w / 2, snapped.x + b.w]
-  const sys = [snapped.y, snapped.y + b.h / 2, snapped.y + b.h]
-  for (const o of others) {
-    const ob = nodeBox(o)
-    const oxs = [o.position.x, o.position.x + ob.w / 2, o.position.x + ob.w]
-    const oys = [o.position.y, o.position.y + ob.h / 2, o.position.y + ob.h]
-    if (dx !== null) for (const x of sxs) if (oxs.some(ox => Math.abs(ox - x) < 0.5)) {
-      guides.v.push({ x, y1: Math.min(snapped.y, o.position.y), y2: Math.max(snapped.y + b.h, o.position.y + ob.h) })
-    }
-    if (dy !== null) for (const y of sys) if (oys.some(oy => Math.abs(oy - y) < 0.5)) {
-      guides.h.push({ y, x1: Math.min(snapped.x, o.position.x), x2: Math.max(snapped.x + b.w, o.position.x + ob.w) })
-    }
-  }
-  return { snapped, guides }
-}
-
-/** References of a generation card in edge order; <Picture N> in the prompt means the N-th entry. */
-function collectRefs(genId: string, nodes: CanvasNode[], edges: Edge[]): RefInfo[] {
-  const out: RefInfo[] = []
-  for (const e of edges.filter(e => e.target === genId)) {
-    const src = nodes.find(n => n.id === e.source)
-    const add = (r: RefInfo) => { if (!out.some(x => x.key === r.key)) out.push(r) }
-    if (src?.type === 'image' && (src as ImageNodeType).data.assetId) {
-      const d = (src as ImageNodeType).data
-      add({ key: `n:${src.id}`, assetId: d.assetId, w: d.w, h: d.h, note: d.prompt ? d.prompt.slice(0, 24) : undefined })
-    } else if (src?.type === 'refset') {
-      for (const s of (src as RefsetNodeType).data.slots) {
-        if (s.assetId) add({ key: `s:${s.id}`, assetId: s.assetId, w: s.w ?? 0, h: s.h ?? 0, note: s.name })
-      }
-    }
-  }
-  return out
-}
-
-/** <Picture N> numbering of a card: refIds keeps every reference it ever had, so a number never moves to another
- *  image; a reference that is no longer connected leaves a hole (undefined) instead of shifting the others. */
-function numberedRefs(refIds: string[] | undefined, connected: RefInfo[]): (RefInfo | undefined)[] {
-  const known = refIds ?? []
-  const all = [...known, ...connected.map(r => r.key).filter(k => !known.includes(k))]
-  return all.map(k => connected.find(r => r.key === k))
-}
-
-/** Order reference pictures as numbered and renumber <Picture N> tags in the prompt to match the submitted list. */
-function prepareRefs(node: GenNodeType | VGenNodeType, nodes: CanvasNode[], edges: Edge[]) {
-  const numbered = numberedRefs(node.data.refIds, collectRefs(node.id, nodes, edges))
-  const refs: string[] = []
-  const position: Record<number, number> = {}
-  const mentioned = new Set(Array.from(node.data.prompt.matchAll(/<Picture\s+(\d+)>/gi), m => Number(m[1])))
-  numbered.forEach((r, i) => {
-    if (!r) return
-    if (node.data.onlyRefs && !mentioned.has(i + 1)) return   // "仅发送引用的图": the unmentioned ones stay home
-    let p = refs.indexOf(r.assetId)
-    if (p < 0) { refs.push(r.assetId); p = refs.length - 1 }
-    position[i + 1] = p + 1
-  })
-  let dropped = 0
-  const prompt = node.data.prompt.trim().replace(/<Picture\s+(\d+)>/gi, (_m, n) => {
-    const p = position[Number(n)]
-    if (!p) { dropped++; return '' }
-    return `<Picture ${p}>`
-  })
-  return { refs, prompt, dropped }
-}
-
-function serialize(nodes: CanvasNode[], edges: Edge[], viewport: unknown) {
-  return {
-    nodes: nodes.map(n => ({ id: n.id, type: n.type, position: n.position, width: n.width, height: n.height, data: n.data })),
-    edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, className: e.className })),
-    viewport,
-  }
-}
-
-/** What a row of the layers panel shows, as plain values so that unchanged rows skip rendering while nodes are dragged. */
-function layerInfo(n: CanvasNode) {
-  const base = { id: n.id, selected: !!n.selected }
-  if (n.type === 'gen') return { ...base, kind: 'gen', text: ((n as GenNodeType).data.prompt || '空').slice(0, 16), thumb: '' }
-  if (n.type === 'vgen') return { ...base, kind: 'vgen', text: ((n as VGenNodeType).data.prompt || '空').slice(0, 16), thumb: '' }
-  if (n.type === 'video') return { ...base, kind: 'video', text: (n as VideoNodeType).data.pending ? '视频 · 生成中' : '视频', thumb: '' }
-  if (n.type === 'refset') {
-    const slots = (n as RefsetNodeType).data.slots
-    return { ...base, kind: 'refset', text: `参考集合 · ${slots.filter(s => s.assetId).length} 张`, thumb: slots.find(s => s.assetId)?.assetId ?? '' }
-  }
-  const d = (n as ImageNodeType).data
-  return { ...base, kind: 'image', text: d.pending ? '图片 · 生成中' : `图片 · ${d.w}×${d.h}`, thumb: d.assetId || '' }
-}
-
-const LayerRow = memo(function LayerRow({ id, selected, kind, text, thumb, onFocus }:
-  ReturnType<typeof layerInfo> & { onFocus: (id: string) => void }) {
-  const pic = thumb ? <img className="layer-thumb" src={assetUrl(thumb, 96)} alt="" draggable={false} /> : null
-  const icon = kind === 'gen' ? <BananaIcon className="ico-banana" />
-    : kind === 'vgen' ? <VideoIcon className="ico-banana" />
-    : kind === 'video' ? <VideoIcon className="ico-image" />
-    : kind === 'refset' ? (pic ?? <CollectionIcon className="ico-collection" />)
-    : (pic ?? <ImageIcon className="ico-image" />)
-  const label = kind === 'gen' ? `图片生成 · ${text}` : kind === 'vgen' ? `视频生成 · ${text}` : text
-  return <li className={selected ? 'on' : ''} onClick={() => onFocus(id)}>{icon} {label}</li>
-})
 
 function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }) {
   const rf = useReactFlow()
@@ -1307,16 +1143,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             <span className={`save ${saveState}`}>{saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : saveState === 'conflict' ? '已在别处修改，请刷新' : '保存失败'}</span>
           </Panel>
           <Panel position="top-right" className="toolbar who"><UsageBadge /><CloudBadge /><UserMenu /></Panel>
-          {layersOpen && (
-            <Panel position="top-right" className="layers">
-              <div className="layers-head"><strong>图层</strong>
-                <button className="icon" onClick={() => setLayersOpen(false)}>✕</button></div>
-              {nodes.length === 0 && <div className="hint">画布上还没有内容</div>}
-              <ul>
-                {[...nodes].reverse().map(n => <LayerRow key={n.id} {...layerInfo(n)} onFocus={focusNode} />)}
-              </ul>
-            </Panel>
-          )}
+          {layersOpen && <LayersPanel nodes={nodes} onClose={() => setLayersOpen(false)} onFocus={focusNode} />}
           <Panel position="bottom-center" className="dock">
             <button className="primary" onClick={addGenCard} disabled={!models.length} title="新建图片生成卡片（A）">
               <BananaIcon /> 图片生成 <kbd>A</kbd>
