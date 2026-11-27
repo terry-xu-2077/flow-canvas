@@ -708,13 +708,29 @@ button.has-cost .lbl { display: inline-flex; align-items: center; gap: 4px; }
 .mk-main { flex: 1; min-height: 0; display: flex; }
 .mk-stage { flex: 1; min-width: 0; position: relative; display: grid; place-items: center; overflow: hidden; }
 .mk-hint { color: var(--muted); }
-.mk-wrap { position: relative; box-shadow: 0 10px 40px #000a; }
+.mk-wrap { position: absolute; box-shadow: 0 10px 40px #000a; }
 .mk-cv { display: block; touch-action: none; user-select: none; }
 .mk-cv.tool-select { cursor: default; }
 .mk-cv.tool-text { cursor: text; }
 .mk-cv.tool-pen, .mk-cv.tool-arrow, .mk-cv.tool-ellipse, .mk-cv.tool-rect { cursor: crosshair; }
-.mk-type { position: absolute; z-index: 2; min-width: 90px; margin: 0; padding: 0 2px; line-height: 1.25; font-weight: 700; font-family: sans-serif;
-  background: #ffffff22; border: 1px dashed #4da3ff; border-radius: 3px; outline: none; resize: none; overflow: hidden; white-space: pre; }
+.mk-selection { position: absolute; border: 1px dashed #4da3ff; pointer-events: none; }
+.mk-handle { position: absolute; width: 16px; height: 16px; display: grid; place-items: center;
+  transform: translate(-50%, -50%); pointer-events: auto; touch-action: none; }
+.mk-handle::before { content: ''; width: 8px; height: 8px; box-sizing: border-box;
+  border: 1px solid #4da3ff; background: #f4f8ff; }
+.mk-handle:hover::before { background: #4da3ff; }
+.mk-handle-rotate { top: -18px; left: 50%; cursor: grab; }
+.mk-handle-rotate:active { cursor: grabbing; }
+.mk-handle-rotate::before { border-radius: 50%; }
+.mk-handle-rotate::after { content: ''; position: absolute; top: 12px; height: 14px; border-left: 1px solid #4da3ff; pointer-events: none; }
+.mk-text-edit { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.mk-type { position: absolute; pointer-events: auto; transform-origin: top left; margin: 0; padding: 0 2px;
+  line-height: 1.25; font-weight: 700; font-family: sans-serif; background: #ffffff22; border: 1px dashed #4da3ff;
+  border-radius: 3px; outline: none; resize: none; overflow: auto; white-space: pre; }
+.mk-text-size { position: absolute; pointer-events: auto; display: flex; align-items: center; justify-content: space-between;
+  width: 116px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel);
+  font-size: 12px; font-variant-numeric: tabular-nums; }
+.mk-text-size button { width: 24px; height: 24px; padding: 0; font-size: 15px; }
 .mk-layers { width: 210px; padding: 10px; overflow: auto; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
 .mk-lh { font-size: 12px; color: var(--muted); padding: 2px 4px 6px; }
 .mk-empty { font-size: 12px; color: var(--muted); padding: 4px; }

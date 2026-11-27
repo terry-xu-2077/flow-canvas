@@ -56,7 +56,16 @@ export interface VideoData extends Record<string, unknown> {
 /** One layer of an annotated picture. Coordinates are in pixels of the base image.
  *  pen: all points; arrow / ellipse / rect: [start, end]; text: [position]. `size` is relative (1000 px of the long side = 1). */
 export type ShapeKind = 'pen' | 'arrow' | 'ellipse' | 'rect' | 'text'
-export interface Shape { id: string; t: ShapeKind; color: string; size: number; pts: [number, number][]; text?: string }
+export interface Shape {
+  id: string
+  t: ShapeKind
+  color: string
+  size: number
+  pts: [number, number][]
+  text?: string
+  rotation?: number // radians around the layer's center
+  scale?: number // uniform multiplier for geometry, stroke and text
+}
 /** The editable source of an annotated picture: the untouched base image plus its layers. */
 export interface Markup { base: string; w: number; h: number; shapes: Shape[] }
 
