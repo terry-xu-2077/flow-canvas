@@ -1,5 +1,6 @@
 import type { Node } from '@xyflow/react'
 import type { ModelInfo } from './api'
+import type { CropRatio } from './imageCrop'
 import type { RefInfo } from './PromptEditor'
 
 export interface JobState {
@@ -66,12 +67,13 @@ export interface Shape {
   rotation?: number // radians around the layer's center
   scale?: number // uniform multiplier for geometry, stroke and text
 }
-/** The editable source of an annotated picture: the untouched base image plus its layers. */
-export interface Markup { base: string; w: number; h: number; shapes: Shape[] }
+export interface CropRect { x: number; y: number; w: number; h: number }
+/** The editable source of an edited picture. Crop and layer coordinates refer to the untouched base image. */
+export interface Markup { base: string; w: number; h: number; shapes: Shape[]; crop?: CropRect; cropRatio?: CropRatio }
 
 export interface ImageData extends Record<string, unknown> {
   assetId: string
-  markup?: Markup // present on an annotated copy: assetId is the merged result, markup the layered source
+  markup?: Markup // assetId is the exported edit, markup is its editable source
   w: number
   h: number
   prompt?: string

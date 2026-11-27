@@ -618,19 +618,23 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
     return () => window.removeEventListener('keydown', onKey)
   }, [addGenCard, addRefset, addVideoCard, fitAll, previewId, cloneGens, undoDelete])
 
-  // ---- markup: the edited picture becomes a new card (merged image + the layered source for later editing)
+  // ---- image editing: save the exported image and the editable source together
   const [markupFor, setMarkupFor] = useState<string | null>(null)
   const markupNode = markupFor ? (nodes.find(n => n.id === markupFor && n.type === 'image') as ImageNodeType | undefined) : undefined
   const saveMarkup = useCallback((src: ImageNodeType, info: { id: string; w: number; h: number }, markup: Markup) => {
-    if (src.data.markup) {
-      // an already annotated card is edited in place: the merged picture and the layers are replaced
-      setNodes(ns => ns.map(n => (n.id === src.id ? ({ ...n, data: { ...n.data, assetId: info.id, w: info.w, h: info.h, markup } } as CanvasNode) : n)))
+    const inPlace = !!src.data.markup
+    const width = inPlace ? nodeBox(src).w : IMAGE_WIDTH
+    const ratioChanged = info.w * src.data.h !== src.data.w * info.h
+    const scale = Math.min(width / info.w, MAX_CARD_WIDTH / info.h)
+    const resized = ratioChanged ? { width: Math.max(1, Math.round(info.w * scale)), height: Math.max(1, Math.round(info.h * scale)) } : undefined
+    if (inPlace) {
+      setNodes(ns => ns.map(n => (n.id === src.id ? ({ ...n, ...resized, data: { ...n.data, assetId: info.id, w: info.w, h: info.h, markup, label: '已编辑' } } as CanvasNode) : n)))
       setMarkupFor(null)
       return
     }
-    const spot = findFree(nodesRef.current, src.position.x + nodeBox(src).w + 60, src.position.y, IMAGE_WIDTH, imgHeight(info.w, info.h) + 40)
-    const node = newImageNode(info.id, info.w, info.h, spot.x, spot.y)
-    node.data = { ...node.data, markup, label: '标记', prompt: src.data.prompt }
+    const spot = findFree(nodesRef.current, src.position.x + nodeBox(src).w + 60, src.position.y, resized?.width ?? IMAGE_WIDTH, (resized?.height ?? imgHeight(info.w, info.h)) + 40)
+    const node = { ...newImageNode(info.id, info.w, info.h, spot.x, spot.y), ...resized }
+    node.data = { ...node.data, markup, label: '已编辑', prompt: src.data.prompt }
     setNodes(ns => [...ns.map(n => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true } as CanvasNode])
     setMarkupFor(null)
   }, [setNodes])
@@ -1071,6 +1075,7 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
   }), [submitting, models, maxCount, patchNode, editSlots, dissolve, generateOnce, generateVideoOnce, cancelJobs, duplicate, continueFrom, refCount, refsOf])
 
   const selectedImages = nodes.filter(n => n.selected && n.type === 'image' && !(n as ImageNodeType).data.pending)
+  const selectedImageIsEdited = !!(selectedImages[0] as ImageNodeType | undefined)?.data.markup
   const viewport = useViewport()
   const selBar = (() => {
     if (!selectedImages.length) return null
@@ -1185,8 +1190,8 @@ function BoardInner({ boardId, onBack }: { boardId: string; onBack: () => void }
             </button>
             {selectedImages.length === 1 && (
               <button onClick={() => setMarkupFor(selectedImages[0].id)}
-                      title={(selectedImages[0] as ImageNodeType).data.markup ? '回到图层继续编辑标记，保存后直接更新这张卡片' : '在图上画笔、文字、箭头、圆圈、方框；保存后生成一张新图卡片（保留可再编辑的图层）'}>
-                <MarkIcon />{(selectedImages[0] as ImageNodeType).data.markup ? '编辑标记' : '添加标记'}
+                      title={selectedImageIsEdited ? '继续编辑裁剪和标记，保存后更新这张卡片' : '裁剪图片或添加标记，保存为新卡片'}>
+                <MarkIcon />{selectedImageIsEdited ? '再次编辑' : '添加编辑'}
               </button>
             )}
             {selectedImages.length === 1 && upscale.enabled && (() => {

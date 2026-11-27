@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, assetUrl, type AssetInfo } from './api'
-import type { Markup, Shape, ShapeKind } from './types'
+import { CROP_HANDLES, CROP_RATIOS, cropRatioFits, dragCrop, fitCropRatio, isCropRatio, matchesCropRatio, normalizeCrop, sameCrop, type CropHandle, type CropRatio } from './imageCrop'
+import type { CropRect, Markup, Shape, ShapeKind } from './types'
 
-type Tool = 'select' | ShapeKind
+type Tool = 'select' | 'crop' | ShapeKind
 type Point = Shape['pts'][number]
-type Box = { x: number; y: number; w: number; h: number }
+type CropEdit = { crop: CropRect | null; ratio: CropRatio | null }
+type HistorySnapshot = { shapes: Shape[]; cropEdit: CropEdit }
 type TextDraft = { at: Point; id?: string; value: string; size: number }
 type TransformKind = 'move' | 'rotate' | 'scale'
-type Drag = { kind: 'draw'; id: string; pointerId: number } | {
+type CropDrag = { kind: 'crop'; pointerId: number; start: Point; handle: CropHandle; initial: CropEdit }
+type Drag = { kind: 'draw'; id: string; pointerId: number }
+  | CropDrag
+  | {
   kind: TransformKind
   shape: Shape
   pointerId: number
@@ -22,6 +27,7 @@ const Ico = ({ children }: { children: React.ReactNode }) => (
 )
 const ICONS: Record<string, React.ReactNode> = {
   select: <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" />,
+  crop: <path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14" />,
   pen: <><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" /></>,
   text: <><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" x2="15" y1="20" y2="20" /><line x1="12" x2="12" y1="4" y2="20" /></>,
   arrow: <><path d="M7 7h10v10" /><path d="M7 17 17 7" /></>,
@@ -32,6 +38,7 @@ const ICONS: Record<string, React.ReactNode> = {
 }
 const TOOLS: { id: Tool; label: string; tip: string }[] = [
   { id: 'select', label: '选择', tip: '拖动标记移动，上方圆点旋转，四角等比缩放。双击编辑文字，Delete 删除' },
+  { id: 'crop', label: '裁剪', tip: '拖动框选要保留的画面，拖动边缘或四角调整范围' },
   { id: 'pen', label: '画笔', tip: '自由绘制' },
   { id: 'text', label: '文字', tip: '点一下画面，输入文字，回车确定（Shift+回车换行）' },
   { id: 'arrow', label: '箭头', tip: '按住拖出箭头' },
@@ -40,12 +47,18 @@ const TOOLS: { id: Tool; label: string; tip: string }[] = [
 ]
 const KIND_ZH: Record<ShapeKind, string> = { pen: '画笔', arrow: '箭头', ellipse: '圆圈', rect: '方框', text: '文字' }
 const SWATCHES = ['#ff3b30', '#ffcc00', '#d7f23b', '#34c759', '#00c7ff', '#ffffff', '#000000']
+const CROP_RATIO_OPTIONS = Object.keys(CROP_RATIOS) as CropRatio[]
+const rememberCropRatio = (ratio: CropRatio | null) => localStorage.setItem('fc_mk_crop_ratio', ratio ?? '')
 const uid = () => Math.random().toString(36).slice(2, 10)
 
 /** Sizes are relative to the picture: 1 unit = 1/1000 of its long side, so a mark looks the same on any resolution. */
 const unit = (w: number, h: number) => Math.max(w, h) / 1000
 const fontPx = (size: number, k: number) => size * 4 * k
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(n, max))
+
+function cropBounds({ crop, ratio }: CropEdit, full: CropRect) {
+  return crop ?? (ratio && matchesCropRatio(full, ratio) ? full : null)
+}
 
 let measureCtx: CanvasRenderingContext2D | null = null
 function textWidth(lines: string[], font: number) {
@@ -70,7 +83,7 @@ function arrowhead(s: Shape, k: number): [Point, Point] {
   ]
 }
 
-function shapeBox(s: Shape, k: number): Box {
+function shapeBox(s: Shape, k: number): CropRect {
   if (s.t === 'text') return textBox(s, k)
   const points = s.t === 'arrow' ? [...s.pts, ...arrowhead(s, k)] : s.pts
   let [left, top] = points[0]
@@ -83,7 +96,7 @@ function shapeBox(s: Shape, k: number): Box {
   return { x: left - pad, y: top - pad, w: right - left + pad * 2, h: bottom - top + pad * 2 }
 }
 
-const boxCenter = (b: Box): Point => [b.x + b.w / 2, b.y + b.h / 2]
+const boxCenter = (b: CropRect): Point => [b.x + b.w / 2, b.y + b.h / 2]
 
 function rotate([x, y]: Point, angle: number): Point {
   const cos = Math.cos(angle), sin = Math.sin(angle)
@@ -145,6 +158,15 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], k: nu
   }
 }
 
+function drawFrame(ctx: CanvasRenderingContext2D, image: HTMLImageElement, full: CropRect, frame: CropRect, shapes: Shape[]) {
+  ctx.clearRect(0, 0, frame.w, frame.h)
+  ctx.save()
+  ctx.translate(-frame.x, -frame.y)
+  ctx.drawImage(image, 0, 0, full.w, full.h)
+  drawShapes(ctx, shapes, unit(full.w, full.h))
+  ctx.restore()
+}
+
 function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
   const dx = bx - ax, dy = by - ay
   const t = dx || dy ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))) : 0
@@ -185,7 +207,7 @@ function hit(s: Shape, x: number, y: number, k: number, tol: number): boolean {
 
 interface Props {
   markup: Markup
-  inPlace?: boolean // editing an already annotated card: saving updates it instead of making a new one
+  inPlace?: boolean // saving an already edited card updates it in place
   onClose: () => void
   onSave: (info: AssetInfo, markup: Markup) => void
 }
@@ -193,12 +215,33 @@ interface Props {
 export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props) {
   const { base, w, h } = markup
   const k = unit(w, h)
+  const full = useMemo(() => ({ x: 0, y: 0, w, h }), [w, h])
   const [shapes, setShapes] = useState<Shape[]>(markup.shapes)
-  const past = useRef<Shape[][]>([])
-  const future = useRef<Shape[][]>([])
-  const [tool, setTool] = useState<Tool>('pen')
+  const [cropEdit, setCropEdit] = useState<CropEdit>(() => {
+    const crop = normalizeCrop(markup.crop, full)
+    if (inPlace) {
+      const ratio = markup.cropRatio && matchesCropRatio(crop ?? full, markup.cropRatio) ? markup.cropRatio : null
+      return { crop, ratio }
+    }
+    const stored = localStorage.getItem('fc_mk_crop_ratio')
+    return { crop, ratio: isCropRatio(stored) && cropRatioFits(full, stored) ? stored : null }
+  })
+  const { crop, ratio } = cropEdit
+  const cropBox = cropBounds(cropEdit, full)
+  const past = useRef<HistorySnapshot[]>([])
+  const future = useRef<HistorySnapshot[]>([])
+  const [tool, setTool] = useState<Tool>(() => {
+    const stored = localStorage.getItem('fc_mk_tool')
+    return TOOLS.find(t => t.id === stored)?.id ?? 'pen'
+  })
+  const cropping = tool === 'crop'
+  const frame = cropping ? full : crop ?? full
   const [color, setColor] = useState(() => localStorage.getItem('fc_mk_color') || '#ff3b30')
   const [size, setSize] = useState(() => Number(localStorage.getItem('fc_mk_size')) || 6)
+  const [textSize, setTextSize] = useState<number | null>(() => {
+    const stored = Number(localStorage.getItem('fc_mk_text_size'))
+    return Number.isInteger(stored) && stored >= 1 && stored <= 100 ? stored : null
+  })
   const [sel, setSel] = useState<string | null>(null)
   const [typing, setTyping] = useState<TextDraft | null>(null)
   const [saving, setSaving] = useState(false)
@@ -208,7 +251,7 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   const [pan, setPan] = useState({ x: 0, y: 0 }) // offset of the picture's centre from the stage's centre, in screen px
   const [spaceDown, setSpaceDown] = useState(false)
   const panning = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
-  const fit = stageSize.width ? clamp(Math.min((stageSize.width - 64) / w, (stageSize.height - 64) / h), 0.02, 1) : 1
+  const fit = stageSize.width ? clamp(Math.min((stageSize.width - 64) / frame.w, (stageSize.height - 64) / frame.h), 0.02, 1) : 1
   const scale = fit * zoom
   const img = useRef<HTMLImageElement | null>(null)
   const [ready, setReady] = useState(false)
@@ -217,10 +260,16 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   const drag = useRef<Drag | null>(null)
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
+  const cropRef = useRef(cropEdit)
+  cropRef.current = cropEdit
   const editingId = typing?.id
 
+  useEffect(() => { localStorage.setItem('fc_mk_tool', tool) }, [tool])
   useEffect(() => { localStorage.setItem('fc_mk_color', color) }, [color])
   useEffect(() => { localStorage.setItem('fc_mk_size', String(size)) }, [size])
+  useEffect(() => {
+    if (textSize !== null) localStorage.setItem('fc_mk_text_size', String(textSize))
+  }, [textSize])
 
   useEffect(() => {
     const i = new Image()
@@ -242,11 +291,8 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   useEffect(() => {
     const c = cv.current
     if (!c || !ready || !img.current) return
-    const ctx = c.getContext('2d')!
-    ctx.clearRect(0, 0, w, h)
-    ctx.drawImage(img.current, 0, 0, w, h)
-    drawShapes(ctx, editingId ? shapes.filter(s => s.id !== editingId) : shapes, k)
-  }, [shapes, ready, w, h, k, editingId])
+    drawFrame(c.getContext('2d')!, img.current, full, frame, editingId ? shapes.filter(s => s.id !== editingId) : shapes)
+  }, [shapes, ready, full, frame, editingId])
 
   // wheel = zoom around the pointer
   useEffect(() => {
@@ -293,17 +339,24 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   }
   const stageUp = () => { panning.current = null }
 
-  const push = useCallback(() => { past.current = [...past.current.slice(-49), shapesRef.current]; future.current = [] }, [])
+  const resetView = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
+  const snapshot = useCallback(() => ({ shapes: shapesRef.current, cropEdit: cropRef.current }), [])
+  const push = useCallback((edit = snapshot()) => { past.current = [...past.current.slice(-49), edit]; future.current = [] }, [snapshot])
+  const restore = useCallback((edit: HistorySnapshot) => {
+    if (!cropping && !sameCrop(cropRef.current.crop, edit.cropEdit.crop)) resetView()
+    if (cropRef.current.ratio !== edit.cropEdit.ratio) rememberCropRatio(edit.cropEdit.ratio)
+    setShapes(edit.shapes); setCropEdit(edit.cropEdit); setSel(null)
+  }, [cropping, resetView])
   const undo = useCallback(() => {
     const prev = past.current.pop()
     if (!prev) return
-    future.current.push(shapesRef.current); setShapes(prev); setSel(null)
-  }, [])
+    future.current.push(snapshot()); restore(prev)
+  }, [snapshot, restore])
   const redo = useCallback(() => {
     const next = future.current.pop()
     if (!next) return
-    past.current.push(shapesRef.current); setShapes(next); setSel(null)
-  }, [])
+    past.current.push(snapshot()); restore(next)
+  }, [snapshot, restore])
   const remove = useCallback((id: string) => { push(); setShapes(ss => ss.filter(s => s.id !== id)); setSel(null) }, [push])
 
   const commitText = useCallback(() => {
@@ -336,33 +389,85 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
     return next
   }, [typing, push, color, k])
 
+  const chooseTool = useCallback((next: Tool) => {
+    commitText()
+    if (next === 'crop' || cropping) {
+      setSel(null)
+      resetView()
+    }
+    setTool(next === 'crop' && cropping ? 'select' : next)
+  }, [commitText, cropping, resetView])
+
+  const changeCrop = (next: CropEdit, previous = cropRef.current) => {
+    const result = normalizeCrop(next.crop, full)
+    if (sameCrop(result, previous.crop) && next.ratio === previous.ratio) {
+      setCropEdit(previous)
+      return
+    }
+    push({ shapes: shapesRef.current, cropEdit: previous })
+    rememberCropRatio(next.ratio)
+    setCropEdit({ crop: result, ratio: next.ratio })
+  }
+
+  const chooseCropRatio = (next: CropRatio | null) => {
+    if (drag.current) return
+    if (next === ratio && (cropBox || !next)) {
+      rememberCropRatio(next)
+      return
+    }
+    const fitted = next ? fitCropRatio(full, crop ?? full, next) : crop
+    if (!next || fitted) changeCrop({ crop: fitted, ratio: next })
+  }
+
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (typing || drag.current) return
-      if (e.key === 'Escape') onClose()
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo() }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); remove(sel) }
+      if (typing || drag.current || saving) return
+      const name = e.key.toLowerCase()
+      const modifier = e.ctrlKey || e.metaKey
+      if (name === 'escape') {
+        if (cropping) chooseTool('select')
+        else onClose()
+      } else if (modifier && (name === 'z' || name === 'y')) {
+        if (name === 'y' || e.shiftKey) redo()
+        else undo()
+      } else if ((name === 'delete' || name === 'backspace') && sel) remove(sel)
+      else return
+      e.preventDefault()
+      e.stopPropagation()
     }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [typing, sel, undo, redo, remove, onClose])
+    window.addEventListener('keydown', key, true)
+    return () => window.removeEventListener('keydown', key, true)
+  }, [typing, sel, undo, redo, remove, onClose, cropping, chooseTool, saving])
 
   const at = (e: React.PointerEvent): Point => {
     const r = cv.current!.getBoundingClientRect()
-    return [((e.clientX - r.left) / r.width) * w, ((e.clientY - r.top) / r.height) * h]
+    return [frame.x + ((e.clientX - r.left) / r.width) * frame.w, frame.y + ((e.clientY - r.top) / r.height) * frame.h]
+  }
+
+  const startCrop = (e: React.PointerEvent, handle: CropHandle) => {
+    if (e.button !== 0 || spaceDown || panning.current || drag.current || saving) return
+    e.stopPropagation()
+    drag.current = { kind: 'crop', pointerId: e.pointerId, start: at(e), handle, initial: cropEdit }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const cropAtPointer = (d: CropDrag, point: Point): CropEdit => {
+    const { ratio } = d.initial
+    const bounds = cropBounds(d.initial, full)
+    return { crop: dragCrop(full, bounds, d.handle, d.start, point, ratio), ratio }
   }
 
   const startTransform = (e: React.PointerEvent, kind: TransformKind, shape: Shape) => {
-    if (e.button !== 0 || spaceDown || panning.current || drag.current) return
+    if (e.button !== 0 || spaceDown || panning.current || drag.current || saving) return
     if (kind !== 'move') e.preventDefault()
     drag.current = { kind, shape, pointerId: e.pointerId, start: at(e), center: boxCenter(shapeBox(shape, k)), moved: false }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   const down = (e: React.PointerEvent) => {
-    if (e.button !== 0 || spaceDown || panning.current || drag.current) return
+    if (e.button !== 0 || spaceDown || panning.current || drag.current || saving) return
     if (typing) { e.preventDefault(); commitText(); return }
+    if (tool === 'crop') { startCrop(e, 'draw'); return }
     const pt = at(e)
     if (tool === 'select') {
       const found = [...shapesRef.current].reverse().find(s => hit(s, pt[0], pt[1], k, 8 / scale))
@@ -370,7 +475,7 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
       if (found) startTransform(e, 'move', found)
       return
     }
-    if (tool === 'text') { setSel(null); setTyping({ at: pt, value: '', size }); e.preventDefault(); return }
+    if (tool === 'text') { setSel(null); setTyping({ at: pt, value: '', size: textSize ?? size }); e.preventDefault(); return }
     push()
     const id = uid()
     const s: Shape = { id, t: tool, color, size, pts: tool === 'pen' ? [pt] : [pt, pt] }
@@ -383,6 +488,10 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
     const d = drag.current
     if (!d || d.pointerId !== e.pointerId) return
     const pt = at(e)
+    if (d.kind === 'crop') {
+      setCropEdit(cropAtPointer(d, pt))
+      return
+    }
     if (d.kind === 'draw') {
       setShapes(ss => ss.map(s => {
         if (s.id !== d.id) return s
@@ -421,6 +530,12 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   const up = (e: React.PointerEvent) => {
     const d = drag.current
     if (!d || d.pointerId !== e.pointerId) return
+    if (d.kind === 'crop') {
+      drag.current = null
+      if (e.type === 'pointerup') changeCrop(cropAtPointer(d, at(e)), d.initial)
+      else setCropEdit(d.initial)
+      return
+    }
     if (d.kind !== 'draw' && e.type === 'pointerup') move(e)
     drag.current = null
     if (d.kind !== 'draw') return
@@ -434,24 +549,35 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
     setColor(c)
     if (sel) { push(); setShapes(ss => ss.map(s => (s.id === sel ? { ...s, color: c } : s))) }
   }
+  const selected = shapes.find(s => s.id === sel)
+  const sizingText = selected ? selected.t === 'text' : tool === 'text'
   const resize = (v: number) => {
-    setSize(v)
+    if (sizingText) setTextSize(v)
+    else setSize(v)
     if (sel) setShapes(ss => ss.map(s => (s.id === sel ? { ...s, size: v } : s)))
   }
 
+  const resizeDraftText = (delta: number) => {
+    if (!typing) return
+    const nextSize = clamp(typing.size + delta, 1, 100)
+    setTextSize(nextSize)
+    setTyping({ ...typing, size: nextSize })
+  }
+
   const save = async () => {
-    if (!img.current || saving) return
+    if (!img.current || saving || drag.current) return
     const savedShapes = commitText()
+    const { crop: savedCrop, ratio: savedRatio } = cropRef.current
+    const result = savedCrop ?? full
+    const cropRatio = savedRatio && matchesCropRatio(result, savedRatio) ? savedRatio : undefined
     setSaving(true); setErr('')
     try {
       const out = document.createElement('canvas')
-      out.width = w; out.height = h
-      const ctx = out.getContext('2d')!
-      ctx.drawImage(img.current, 0, 0, w, h)
-      drawShapes(ctx, savedShapes, k)
+      out.width = result.w; out.height = result.h
+      drawFrame(out.getContext('2d')!, img.current, full, result, savedShapes)
       const blob = await new Promise<Blob>((ok, no) => out.toBlob(b => (b ? ok(b) : no(new Error('导出失败'))), 'image/png'))
       const info = await api.uploadAsset(blob)
-      onSave(info, { base, w, h, shapes: savedShapes })
+      onSave(info, { base, w, h, shapes: savedShapes, ...(savedCrop ? { crop: savedCrop } : {}), cropRatio })
     } catch (e) { setErr(`保存失败：${(e as Error).message}`); setSaving(false) }
   }
 
@@ -465,10 +591,12 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   }, [size, k, scale])
 
   const layers = useMemo(() => [...shapes].reverse(), [shapes])
-  const selected = shapes.find(s => s.id === sel)
-  const selectionBox = selected && !typing ? shapeBox(selected, k) : null
-  const wrapX = (stageSize.width - w * scale) / 2 + pan.x
-  const wrapY = (stageSize.height - h * scale) / 2 + pan.y
+  const selectionBox = selected && !typing && !cropping ? shapeBox(selected, k) : null
+  const sizeControlValue = sizingText ? textSize ?? size : size
+  const offsetX = pan.x - frame.w * scale / 2
+  const offsetY = pan.y - frame.h * scale / 2
+  const wrapX = stageSize.width / 2 + offsetX
+  const wrapY = stageSize.height / 2 + offsetY
 
   let textLayout: { x: number; y: number; w: number; h: number; font: number; rotation: number; toolbarX: number; toolbarY: number } | undefined
   if (typing) {
@@ -478,8 +606,9 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
     const lines = typing.value.split('\n')
     const minWidth = Math.min(Math.ceil(screenFont * 3) + 6, Math.max(24, stageSize.width - 16))
     const lineHeight = Math.ceil(screenFont * 1.25) + 2
-    const x = rotation ? typing.at[0] * scale : Math.min(typing.at[0] * scale, stageSize.width - wrapX - minWidth - 8)
-    const y = rotation ? typing.at[1] * scale : Math.min(typing.at[1] * scale, stageSize.height - wrapY - lineHeight - 8)
+    const left = (typing.at[0] - frame.x) * scale, top = (typing.at[1] - frame.y) * scale
+    const x = rotation ? left : Math.min(left, stageSize.width - wrapX - minWidth - 8)
+    const y = rotation ? top : Math.min(top, stageSize.height - wrapY - lineHeight - 8)
     const width = clamp(Math.ceil(textWidth(lines, screenFont)) + 7, minWidth, stageSize.width - wrapX - x - 8)
     const height = clamp(Math.ceil(screenFont * 1.25 * lines.length) + 2, lineHeight, stageSize.height - wrapY - y - 8)
     const toolbarX = clamp(x, 8 - wrapX, stageSize.width - wrapX - 124)
@@ -490,48 +619,84 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
   return (
     <div className="mk" onPointerDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
       <div className="mk-bar">
-        <strong>添加标记</strong>
+        <strong>编辑图片</strong>
         <div className="mk-tools">
           {TOOLS.map(t => (
-            <button key={t.id} className={tool === t.id ? 'on' : ''} title={t.tip} onClick={() => { commitText(); setTool(t.id) }}><Ico>{ICONS[t.id]}</Ico>{t.label}</button>
+            <button key={t.id} className={tool === t.id ? 'on' : ''} aria-pressed={tool === t.id} disabled={saving || (t.id === 'crop' && !ready)}
+                    title={t.tip} onClick={() => chooseTool(t.id)}><Ico>{ICONS[t.id]}</Ico>{t.label}</button>
           ))}
         </div>
-        <label className="mk-field" title="新标记的颜色；选中一个图层时也会改它的颜色">颜色
-          <input type="color" value={color} onChange={e => recolor(e.target.value)} />
-        </label>
-        <span className="mk-sw">
-          {SWATCHES.map(c => <i key={c} className={c === color ? 'on' : ''} style={{ background: c }} onClick={() => recolor(c)} />)}
-        </span>
-        <label className="mk-field" title="画笔 / 线条 / 文字的粗细（选中图层时同步修改）">粗细
-          <input type="range" min={2} max={100} value={size} onChange={e => resize(Number(e.target.value))} />
-          <span className="mk-num">{size}</span>
-        </label>
-        <button onClick={undo} title="撤销 Ctrl+Z"><Ico>{ICONS.undo}</Ico>撤销</button>
-        <button onClick={redo} title="重做 Ctrl+Shift+Z"><Ico>{ICONS.redo}</Ico>重做</button>
-        <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} title="滚轮缩放，按住空格拖动画面；点这里回到适应窗口">{Math.round(scale * 100)}%</button>
+        {!cropping && <>
+          <label className="mk-field" title="新标记的颜色；选中一个图层时也会改它的颜色">颜色
+            <input type="color" value={color} onChange={e => recolor(e.target.value)} />
+          </label>
+          <span className="mk-sw">
+            {SWATCHES.map(c => <i key={c} className={c === color ? 'on' : ''} style={{ background: c }} onClick={() => recolor(c)} />)}
+          </span>
+          <label className="mk-field" title={sizingText ? '调整字号（选中图层时同步修改）' : '调整画笔和线条的粗细（选中图层时同步修改）'}>{sizingText ? '字号' : '粗细'}
+            <input type="range" min={sizingText ? 1 : 2} max={100} value={sizeControlValue} onChange={e => resize(Number(e.target.value))} />
+            <span className="mk-num">{sizeControlValue}</span>
+          </label>
+        </>}
+        <button onClick={undo} disabled={saving} title="撤销 Ctrl+Z"><Ico>{ICONS.undo}</Ico>撤销</button>
+        <button onClick={redo} disabled={saving} title="重做 Ctrl+Shift+Z"><Ico>{ICONS.redo}</Ico>重做</button>
+        <button onClick={resetView} title="滚轮缩放，按住空格拖动画面；点这里回到适应窗口">{Math.round(scale * 100)}%</button>
         <span className="mk-gap" />
         {err && <span className="mk-err">{err}</span>}
-        <button onClick={onClose}>取消</button>
-        <button className="primary" disabled={saving || !ready} onClick={() => void save()} title={inPlace ? '更新这张卡片（合并图和图层一起替换）' : '合并成一张新图放到画板上，同时保留可再编辑的图层'}>
+        <button onClick={onClose} disabled={saving}>取消</button>
+        <button className="primary" disabled={saving || !ready} onClick={() => void save()} title={inPlace ? '更新这张卡片并保留可继续编辑的裁剪和图层' : '将编辑结果保存为新卡片，保留原图'}>
           {saving ? '保存中…' : inPlace ? '保存' : '保存为新卡片'}
         </button>
       </div>
+      {cropping && (
+        <div className="mk-crop-bar" aria-label="裁剪选项">
+          <div className="mk-crop-ratios" role="group" aria-label="裁剪比例">
+            <button type="button" aria-pressed={!ratio} disabled={saving} onClick={() => chooseCropRatio(null)}>自由</button>
+            {CROP_RATIO_OPTIONS.map(option => {
+              const fits = cropRatioFits(full, option)
+              return <button key={option} type="button" aria-pressed={ratio === option} disabled={saving || !fits}
+                             title={fits ? undefined : '原图尺寸太小'} onClick={() => chooseCropRatio(option)}>{option}</button>
+            })}
+          </div>
+          {cropBox ? <output aria-label="裁剪尺寸">{cropBox.w} × {cropBox.h} px</output> : <span>在图片上拖动，框选要保留的区域</span>}
+          <button onClick={() => { if (!drag.current) changeCrop({ crop: null, ratio: null }) }} disabled={(!cropBox && !ratio) || saving}>重置裁剪</button>
+        </div>
+      )}
       <div className="mk-main">
         <div className="mk-stage" ref={stage} onPointerDown={stageDown} onPointerMove={stageMove} onPointerUp={stageUp} onPointerCancel={stageUp}
              style={{ cursor: spaceDown ? (panning.current ? 'grabbing' : 'grab') : undefined }}>
           {!ready && <span className="mk-hint">{err || '加载中…'}</span>}
-          <div className="mk-wrap" style={{ width: w * scale, height: h * scale, display: ready ? 'block' : 'none', left: wrapX, top: wrapY }}
+          <div className="mk-wrap" style={{ width: frame.w * scale, height: frame.h * scale, display: ready ? 'block' : 'none', left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)` }}
                onPointerMove={move} onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up}>
-            <canvas ref={cv} width={w} height={h} className={`mk-cv tool-${tool}`} style={{ width: w * scale, height: h * scale, cursor: spaceDown ? 'inherit' : tool === 'pen' ? penCursor : undefined }}
+            <canvas ref={cv} width={frame.w} height={frame.h} className={`mk-cv tool-${tool}`} style={{ width: frame.w * scale, height: frame.h * scale, cursor: spaceDown ? 'inherit' : tool === 'pen' ? penCursor : undefined }}
                     onPointerDown={down}
                     onDoubleClick={() => {
                       const s = shapesRef.current.find(x => x.id === sel)
                       if (tool === 'select' && s?.t === 'text') setTyping({ at: textOrigin(s, k), id: s.id, value: s.text ?? '', size: s.size })
                     }} />
+            {cropping && cropBox && (
+              <>
+                <div className="mk-crop-mask" aria-hidden style={{
+                  gridTemplateColumns: `${cropBox.x * scale}px ${cropBox.w * scale}px 1fr`,
+                  gridTemplateRows: `${cropBox.y * scale}px ${cropBox.h * scale}px 1fr`,
+                }}><i /><i /><i /><i /></div>
+                <div className="mk-crop-box" style={{
+                  left: cropBox.x * scale, top: cropBox.y * scale, width: cropBox.w * scale, height: cropBox.h * scale,
+                  pointerEvents: spaceDown ? 'none' : undefined,
+                  cursor: crop ? 'move' : 'crosshair',
+                }} title={crop ? '拖动移动裁剪框' : '拖动框选要保留的区域'} onPointerDown={e => startCrop(e, crop ? 'move' : 'draw')}>
+                  {CROP_HANDLES.map(handle => (
+                    <span key={`${handle.x},${handle.y}`} className="mk-crop-handle" title="拖动调整裁剪范围" style={{
+                      left: `${(handle.x + 1) * 50}%`, top: `${(handle.y + 1) * 50}%`, cursor: handle.cursor,
+                    }} onPointerDown={e => startCrop(e, handle)} />
+                  ))}
+                </div>
+              </>
+            )}
             {selected && selectionBox && (
               <div className="mk-selection" style={{
-                left: (selectionBox.x + selectionBox.w / 2) * scale,
-                top: (selectionBox.y + selectionBox.h / 2) * scale,
+                left: (selectionBox.x + selectionBox.w / 2 - frame.x) * scale,
+                top: (selectionBox.y + selectionBox.h / 2 - frame.y) * scale,
                 width: Math.max(20, selectionBox.w * (selected.scale ?? 1) * scale + 10),
                 height: Math.max(20, selectionBox.h * (selected.scale ?? 1) * scale + 10),
                 transform: `translate(-50%, -50%) rotate(${selected.rotation ?? 0}rad)`,
@@ -566,10 +731,10 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
                 <div className="mk-text-size" role="group" aria-label="文字大小" style={{ left: textLayout.toolbarX, top: textLayout.toolbarY }}
                      onPointerDown={e => { if (e.button === 0) e.preventDefault() }}>
                   <button type="button" aria-label="减小字号" title="减小字号" disabled={typing.size <= 1}
-                          onClick={() => setTyping({ ...typing, size: typing.size - 1 })}>−</button>
+                          onClick={() => resizeDraftText(-1)}>−</button>
                   <output aria-label="字号">{Math.round(textLayout.font)} px</output>
                   <button type="button" aria-label="增大字号" title="增大字号" disabled={typing.size >= 100}
-                          onClick={() => setTyping({ ...typing, size: typing.size + 1 })}>+</button>
+                          onClick={() => resizeDraftText(1)}>+</button>
                 </div>
               </div>
             )}
@@ -579,10 +744,10 @@ export default function MarkupEditor({ markup, inPlace, onClose, onSave }: Props
           <div className="mk-lh">图层（{shapes.length}）</div>
           {layers.length === 0 && <div className="mk-empty">还没有标记</div>}
           {layers.map(s => (
-            <div key={s.id} className={`mk-layer${s.id === sel ? ' on' : ''}`} onClick={() => { setSel(s.id); setTool('select') }}>
+            <div key={s.id} className={`mk-layer${s.id === sel ? ' on' : ''}`} onClick={() => { if (!saving) { chooseTool('select'); setSel(s.id) } }}>
               <i style={{ background: s.color }} />
               <span>{KIND_ZH[s.t]}{s.t === 'text' && s.text ? ` · ${s.text.slice(0, 10)}` : ''}</span>
-              <button className="icon" title="删除这一层" onClick={e => { e.stopPropagation(); remove(s.id) }}>✕</button>
+              <button className="icon" title="删除这一层" disabled={cropping || saving} onClick={e => { e.stopPropagation(); remove(s.id) }}>✕</button>
             </div>
           ))}
         </div>

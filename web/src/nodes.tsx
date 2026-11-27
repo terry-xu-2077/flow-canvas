@@ -319,6 +319,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
       </>
     )
   }
+  const label = data.markup ? '已编辑' : data.label
   return (
     <>
     <NodeResizer minWidth={120} keepAspectRatio isVisible={selected} lineClassName="rz-line" handleClassName="rz-handle" />
@@ -329,7 +330,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
         alt="" onDoubleClick={() => canvas.preview(data.assetId)}
       />
       <div className="img-meta"><ImageIcon className="ico-image" /> {data.w} × {data.h}</div>
-      {data.label && <div className="img-label" title={`由 ${data.label} 生成`}>{data.label}</div>}
+      {label && <div className="img-label" title={data.markup ? label : `由 ${label} 生成`}>{label}</div>}
       <Handle type="source" position={Position.Right} />
     </div>
     </>
